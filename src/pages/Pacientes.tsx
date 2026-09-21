@@ -7,7 +7,6 @@ type Paciente = {
   id: string; 
   nome_completo: string; 
   cpf: string; 
-  rg: string; 
   data_nascimento: string; 
   telefone: string; 
   email: string; 
@@ -30,6 +29,10 @@ export default function Pacientes() {
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
+
+  // ESTADOS PARA OS AVISOS BONITOS (Substitui os alerts e confirms)
+  const [toast, setToast] = useState<{ show: boolean, msg: string, type: 'success' | 'error' }>({ show: false, msg: '', type: 'success' });
+  const [confirmDialog, setConfirmDialog] = useState<{ show: boolean, msg: string, action: (() => void) | null }>({ show: false, msg: '', action: null });
 
   const [modalAberto, setModalAberto] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -75,9 +78,17 @@ export default function Pacientes() {
   const [isDrawingCliente, setIsDrawingCliente] = useState(false);
   const [isDrawingProf, setIsDrawingProf] = useState(false);
 
+  // FUNÇÃO PARA EXIBIR O TOAST (Aviso flutuante)
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ show: true, msg, type });
+    setTimeout(() => setToast(t => ({ ...t, show: false })), 3500);
+  };
+
   const formatarCPF = (v: string) => v.replace(/\D/g, '').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})/, '$1-$2').replace(/(-\d{2})\d+?$/, '$1');
   const formatarTelefone = (v: string) => v.replace(/\D/g, '').replace(/(\d{2})(\d)/, '($1) $2').replace(/(\d{5})(\d)/, '$1-$2').replace(/(-\d{4})\d+?$/, '$1');
   const formatarCEP = (v: string) => v.replace(/\D/g, '').replace(/(\d{5})(\d)/, '$1-$2').replace(/(-\d{3})\d+?$/, '$1');
+
+  const estadosBrasil = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
 
   const formatarTextoTermo = (texto: string) => texto.split(/\\n|\n/).map((linha, idx) => {
     if (linha.trim() === '') return <br key={idx} />;
@@ -162,11 +173,10 @@ export default function Pacientes() {
             </tr>
             <tr>
               <td colspan="1" style="width: 40%;"><span class="label">CPF:</span> <span class="val">${form.cpf || ''}</span></td>
-              <td colspan="2"><span class="label">RG:</span> <span class="val">${form.rg || ''}</span></td>
+              <td colspan="2"><span class="label">Telefone:</span> <span class="val">${form.telefone || ''}</span></td>
             </tr>
             <tr>
-              <td colspan="1"><span class="label">Telefone:</span> <span class="val">${form.telefone || ''}</span></td>
-              <td colspan="2"><span class="label">E-mail:</span> <span class="val">${form.email || ''}</span></td>
+              <td colspan="3"><span class="label">E-mail:</span> <span class="val">${form.email || ''}</span></td>
             </tr>
             <tr>
               <td colspan="3"><span class="label">Endereço:</span> <span class="val">${enderecoCompleto}</span></td>
@@ -273,7 +283,7 @@ export default function Pacientes() {
     html += `</div>`;
 
     const opt = { margin: 15, filename: nomeArquivo, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: 'css', avoid: '.avoid-cut' } };
-    try { await html2pdf().set(opt).from(html).save(); } catch (error) { alert("Ocorreu um erro ao gerar o arquivo PDF. Tente novamente."); } finally { setGerandoPdf(false); }
+    try { await html2pdf().set(opt).from(html).save(); } catch (error) { showToast("Ocorreu um erro ao gerar o PDF. Tente novamente.", "error"); } finally { setGerandoPdf(false); }
   };
 
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => { setIsDrawing(true); const ctx = canvasRef.current?.getContext('2d'); if (!ctx) return; const rect = canvasRef.current!.getBoundingClientRect(); const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX; const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY; ctx.beginPath(); ctx.moveTo(clientX - rect.left, clientY - rect.top); };
@@ -295,11 +305,11 @@ export default function Pacientes() {
   const buscarHistoricoPaciente = async (pacienteId: string) => { const { data: anamneses } = await supabase.from('fichas_anamnese').select('*').eq('paciente_id', pacienteId).order('created_at', { ascending: false }); if (anamneses) setHistoricoAnamneses(anamneses); const { data: documentos } = await supabase.from('documentos_legais').select('*').eq('paciente_id', pacienteId).order('created_at', { ascending: false }); if (documentos) setHistoricoDocumentos(documentos); const { data: midiasData } = await supabase.from('paciente_midias').select('*').eq('paciente_id', pacienteId).order('data_registro', { ascending: false }); if (midiasData) setHistoricoMidias(midiasData); };
   
   const salvarPaciente = async () => { 
-    if (!form.nome_completo) return alert('Nome obrigatório!'); 
+    if (!form.nome_completo) return showToast('O Nome do paciente é obrigatório.', 'error'); 
+    
     const payload = { 
       nome_completo: form.nome_completo, 
       cpf: form.cpf || null, 
-      rg: form.rg || null, 
       data_nascimento: form.data_nascimento || null, 
       telefone: form.telefone || null, 
       email: form.email || null, 
@@ -310,51 +320,153 @@ export default function Pacientes() {
       cidade: form.cidade || null,
       estado: form.estado || null
     }; 
+
     if (isEditing && form.id) { 
-      await supabase.from('pacientes').update(payload).eq('id', form.id); 
+      const { error } = await supabase.from('pacientes').update(payload).eq('id', form.id); 
+      if (error) { showToast('Erro ao atualizar: ' + error.message, 'error'); return; }
       buscarPacientes(); 
-      alert('Atualizado com sucesso!'); 
+      showToast('Paciente atualizado com sucesso!', 'success'); 
     } else { 
-      const { data } = await supabase.from('pacientes').insert([{ ...payload, data_cadastro: new Date().toISOString() }]).select().single(); 
+      const { data, error } = await supabase.from('pacientes').insert([{ ...payload, data_cadastro: new Date().toISOString() }]).select().single(); 
+      if (error) { showToast('Erro ao cadastrar: Verifique se as colunas foram criadas na base de dados.', 'error'); return; }
       if (data) { 
         buscarPacientes(); 
         setForm(data); 
         setIsEditing(true); 
-        alert('Cadastrado com sucesso!'); 
+        showToast('Novo paciente registado com sucesso!', 'success'); 
       } 
     } 
   };
 
-  const deletarPaciente = async (id: string, e: React.MouseEvent) => {
+  const deletarPaciente = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm('Tem a certeza que deseja eliminar este paciente e todo o seu histórico? Esta ação é irreversível.')) {
-      const { error } = await supabase.from('pacientes').delete().eq('id', id);
-      if (error) { alert('Erro ao eliminar paciente: ' + error.message); } else { setPacientes(prev => prev.filter(p => p.id !== id)); }
-    }
+    setConfirmDialog({
+      show: true,
+      msg: 'Tem a certeza que deseja eliminar este paciente e todo o seu histórico? Esta ação é permanente.',
+      action: async () => {
+        const { error } = await supabase.from('pacientes').delete().eq('id', id);
+        if (error) { showToast('Erro ao apagar: ' + error.message, 'error'); } 
+        else { setPacientes(prev => prev.filter(p => p.id !== id)); showToast('Paciente eliminado.', 'success'); }
+        setConfirmDialog({ show: false, msg: '', action: null });
+      }
+    });
   };
 
-  const gerarAssinaturaEletronica = async (dupla = false) => { if (!termoAceito) { alert("O Paciente precisa aceitar os termos."); return null; } if (cpfAssinatura.length < 14) { alert("CPF do Paciente incompleto."); return null; } if (dupla) { if (!profAceito) { alert("A Profissional precisa aceitar."); return null; } if (registroProfissional.length < 4) { alert("Registro da Profissional incompleto."); return null; } } let ip = 'IP não identificado'; try { const response = await fetch('https://api.ipify.org?format=json'); const data = await response.json(); ip = data.ip; } catch (e) {} const userAgent = navigator.userAgent; const dataHora = new Date().toISOString(); const stringParaHash = dupla ? `PACIENTE:${cpfAssinatura}-PROF:${registroProfissional}-${dataHora}-${ip}-${userAgent}` : `${cpfAssinatura}-${dataHora}-${ip}-${userAgent}`; const msgBuffer = new TextEncoder().encode(stringParaHash); const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer); const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join(''); return { tipo: dupla ? 'eletronica_avancada_dupla' : 'eletronica_avancada', cpf_assinante: cpfAssinatura, cpf_paciente: cpfAssinatura, registro_profissional: registroProfissional, ip_dispositivo: ip, user_agent: userAgent, data_hora_assinatura: dataHora, hash_autenticacao: hashHex }; };
+  const gerarAssinaturaEletronica = async (dupla = false) => { if (!termoAceito) { showToast("É necessário aceitar os termos de compromisso.", "error"); return null; } if (cpfAssinatura.length < 14) { showToast("O CPF do paciente está incompleto.", "error"); return null; } if (dupla) { if (!profAceito) { showToast("A Profissional precisa de confirmar a autenticação.", "error"); return null; } if (registroProfissional.length < 4) { showToast("O Registo da Profissional está incompleto.", "error"); return null; } } let ip = 'IP não identificado'; try { const response = await fetch('https://api.ipify.org?format=json'); const data = await response.json(); ip = data.ip; } catch (e) {} const userAgent = navigator.userAgent; const dataHora = new Date().toISOString(); const stringParaHash = dupla ? `PACIENTE:${cpfAssinatura}-PROF:${registroProfissional}-${dataHora}-${ip}-${userAgent}` : `${cpfAssinatura}-${dataHora}-${ip}-${userAgent}`; const msgBuffer = new TextEncoder().encode(stringParaHash); const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer); const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join(''); return { tipo: dupla ? 'eletronica_avancada_dupla' : 'eletronica_avancada', cpf_assinante: cpfAssinatura, cpf_paciente: cpfAssinatura, registro_profissional: registroProfissional, ip_dispositivo: ip, user_agent: userAgent, data_hora_assinatura: dataHora, hash_autenticacao: hashHex }; };
   const iniciarNovaFicha = (modelo: ModeloFicha) => { setFichaSelecionada(modelo); setRespostasAtuais({}); setDataAssinatura(new Date().toISOString().split('T')[0]); setFichaPreenchidaId(null); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoAnamnese('preenchendo'); setTimeout(limparAssinatura, 100); };
-  const editarFichaSalva = (fichaSalva: any) => { const modeloOriginal = modelosFichas.find(m => m.titulo === fichaSalva.historico_medico?.tipo_ficha); if (!modeloOriginal) return alert('Modelo não encontrado.'); setFichaSelecionada(modeloOriginal); setRespostasAtuais(fichaSalva.historico_medico?.respostas || {}); setDataAssinatura(fichaSalva.historico_medico?.data_assinatura || new Date().toISOString().split('T')[0]); setFichaPreenchidaId(fichaSalva.id); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoAnamnese('preenchendo'); setTimeout(() => { const ctx = canvasRef.current?.getContext('2d'); if (fichaSalva.historico_medico?.assinatura_desenho && ctx) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0); img.src = fichaSalva.historico_medico.assinatura_desenho; } else limparAssinatura(); }, 150); };
-  const excluirFichaSalva = async (id: string) => { if (window.confirm('Excluir esta ficha?')) { await supabase.from('fichas_anamnese').delete().eq('id', id); setHistoricoAnamneses(prev => prev.filter(f => f.id !== id)); } };
-  const salvarFichaAnamnese = async () => { const imgDesenho = getImgCanvas(); const dadosAssinatura = await gerarAssinaturaEletronica(false); if (!dadosAssinatura) return; const payload = { paciente_id: form.id, historico_medico: { tipo_ficha: fichaSelecionada?.titulo, respostas: respostasAtuais, assinatura_desenho: imgDesenho, assinatura_eletronica: dadosAssinatura, data_assinatura: dataAssinatura, data_preenchimento: new Date().toISOString() } }; if (fichaPreenchidaId) { const { data } = await supabase.from('fichas_anamnese').update(payload).eq('id', fichaPreenchidaId).select().single(); if (data) { setHistoricoAnamneses(prev => prev.map(f => f.id === fichaPreenchidaId ? data : f)); setFluxoAnamnese('lista'); } } else { const { data } = await supabase.from('fichas_anamnese').insert([payload]).select().single(); if (data) { setHistoricoAnamneses(prev => [data, ...prev]); setFluxoAnamnese('lista'); } } };
+  const editarFichaSalva = (fichaSalva: any) => { const modeloOriginal = modelosFichas.find(m => m.titulo === fichaSalva.historico_medico?.tipo_ficha); if (!modeloOriginal) return showToast('Modelo base desta ficha já não existe.', 'error'); setFichaSelecionada(modeloOriginal); setRespostasAtuais(fichaSalva.historico_medico?.respostas || {}); setDataAssinatura(fichaSalva.historico_medico?.data_assinatura || new Date().toISOString().split('T')[0]); setFichaPreenchidaId(fichaSalva.id); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoAnamnese('preenchendo'); setTimeout(() => { const ctx = canvasRef.current?.getContext('2d'); if (fichaSalva.historico_medico?.assinatura_desenho && ctx) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0); img.src = fichaSalva.historico_medico.assinatura_desenho; } else limparAssinatura(); }, 150); };
+  
+  const excluirFichaSalva = (id: string) => { 
+    setConfirmDialog({
+      show: true, msg: 'Pretende mesmo eliminar esta ficha de anamnese?',
+      action: async () => {
+        await supabase.from('fichas_anamnese').delete().eq('id', id); 
+        setHistoricoAnamneses(prev => prev.filter(f => f.id !== id));
+        showToast('Ficha eliminada com sucesso.', 'success');
+        setConfirmDialog({ show: false, msg: '', action: null });
+      }
+    });
+  };
+
+  const salvarFichaAnamnese = async () => { const imgDesenho = getImgCanvas(); const dadosAssinatura = await gerarAssinaturaEletronica(false); if (!dadosAssinatura) return; const payload = { paciente_id: form.id, historico_medico: { tipo_ficha: fichaSelecionada?.titulo, respostas: respostasAtuais, assinatura_desenho: imgDesenho, assinatura_eletronica: dadosAssinatura, data_assinatura: dataAssinatura, data_preenchimento: new Date().toISOString() } }; if (fichaPreenchidaId) { const { data } = await supabase.from('fichas_anamnese').update(payload).eq('id', fichaPreenchidaId).select().single(); if (data) { setHistoricoAnamneses(prev => prev.map(f => f.id === fichaPreenchidaId ? data : f)); setFluxoAnamnese('lista'); showToast('Ficha atualizada.', 'success'); } } else { const { data } = await supabase.from('fichas_anamnese').insert([payload]).select().single(); if (data) { setHistoricoAnamneses(prev => [data, ...prev]); setFluxoAnamnese('lista'); showToast('Ficha guardada com sucesso.', 'success'); } } };
 
   const iniciarNovoTermo = (modelo: ModeloTermo) => { setTermoSelecionado(modelo); setRespostasTermo({}); setAutorizacaoTermo(null); setCidadeTermo('João Monlevade - MG'); setDataAssinatura(new Date().toISOString().split('T')[0]); setTermoPreenchidoId(null); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoDocumento('preenchendo'); setTimeout(() => { limparCanvasTermo('cliente'); limparCanvasTermo('prof'); }, 100); };
-  const editarTermoSalvo = (termoSalvo: any) => { const modeloOriginal = modelosTermos.find(m => m.titulo === termoSalvo.tipo_documento); if (!modeloOriginal) return alert('Modelo não encontrado.'); const docs = termoSalvo.url_documento_assinado; setTermoSelecionado(modeloOriginal); setRespostasTermo(docs.respostas_extras || {}); setAutorizacaoTermo(docs.autorizacao || null); setCidadeTermo(docs.cidade || 'João Monlevade - MG'); setDataAssinatura(docs.data_assinatura || new Date().toISOString().split('T')[0]); setTermoPreenchidoId(termoSalvo.id); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoDocumento('preenchendo'); setTimeout(() => { const ctxC = canvasClienteRef.current?.getContext('2d'); const ctxP = canvasProfRef.current?.getContext('2d'); if (docs.assinatura_cliente_desenho && ctxC) { const img = new Image(); img.onload = () => ctxC.drawImage(img, 0, 0); img.src = docs.assinatura_cliente_desenho; } else limparCanvasTermo('cliente'); if (docs.assinatura_profissional_desenho && ctxP) { const img = new Image(); img.onload = () => ctxC.drawImage(img, 0, 0); img.src = docs.assinatura_profissional_desenho; } else limparCanvasTermo('prof'); }, 150); };
-  const excluirTermoSalvo = async (id: string) => { if (window.confirm('Excluir termo?')) { await supabase.from('documentos_legais').delete().eq('id', id); setHistoricoDocumentos(prev => prev.filter(d => d.id !== id)); } };
-  const salvarDocumentoTermo = async () => { if (!autorizacaoTermo) return alert("Marque se AUTORIZA ou NÃO AUTORIZA."); const imgCliente = getImgCanvasTermo(canvasClienteRef); const imgProf = getImgCanvasTermo(canvasProfRef); const dadosAssinatura = await gerarAssinaturaEletronica(true); if (!dadosAssinatura) return; const payload = { paciente_id: form.id, tipo_documento: termoSelecionado?.titulo, status_assinatura: true, url_documento_assinado: { texto_acordado: termoSelecionado?.conteudo, respostas_extras: respostasTermo, autorizacao: autorizacaoTermo, cidade: cidadeTermo, data_assinatura: dataAssinatura, assinatura_cliente_desenho: imgCliente, assinatura_profissional_desenho: imgProf, assinatura_eletronica: dadosAssinatura } }; if (termoPreenchidoId) { const { data } = await supabase.from('documentos_legais').update(payload).eq('id', termoPreenchidoId).select().single(); if (data) { setHistoricoDocumentos(prev => prev.map(d => d.id === termoPreenchidoId ? data : d)); setFluxoDocumento('lista'); } } else { const { data } = await supabase.from('documentos_legais').insert([payload]).select().single(); if (data) { setHistoricoDocumentos(prev => [data, ...prev]); setFluxoDocumento('lista'); } } };
+  const editarTermoSalvo = (termoSalvo: any) => { const modeloOriginal = modelosTermos.find(m => m.titulo === termoSalvo.tipo_documento); if (!modeloOriginal) return showToast('Modelo não encontrado.', 'error'); const docs = termoSalvo.url_documento_assinado; setTermoSelecionado(modeloOriginal); setRespostasTermo(docs.respostas_extras || {}); setAutorizacaoTermo(docs.autorizacao || null); setCidadeTermo(docs.cidade || 'João Monlevade - MG'); setDataAssinatura(docs.data_assinatura || new Date().toISOString().split('T')[0]); setTermoPreenchidoId(termoSalvo.id); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoDocumento('preenchendo'); setTimeout(() => { const ctxC = canvasClienteRef.current?.getContext('2d'); const ctxP = canvasProfRef.current?.getContext('2d'); if (docs.assinatura_cliente_desenho && ctxC) { const img = new Image(); img.onload = () => ctxC.drawImage(img, 0, 0); img.src = docs.assinatura_cliente_desenho; } else limparCanvasTermo('cliente'); if (docs.assinatura_profissional_desenho && ctxP) { const img = new Image(); img.onload = () => ctxC.drawImage(img, 0, 0); img.src = docs.assinatura_profissional_desenho; } else limparCanvasTermo('prof'); }, 150); };
+  
+  const excluirTermoSalvo = (id: string) => { 
+    setConfirmDialog({
+      show: true, msg: 'Excluir definitivamente este Termo de Consentimento?',
+      action: async () => {
+        await supabase.from('documentos_legais').delete().eq('id', id); 
+        setHistoricoDocumentos(prev => prev.filter(d => d.id !== id));
+        showToast('Termo excluído com sucesso.', 'success');
+        setConfirmDialog({ show: false, msg: '', action: null });
+      }
+    });
+  };
+
+  const salvarDocumentoTermo = async () => { if (!autorizacaoTermo) return showToast("Assinale se o paciente AUTORIZA ou NÃO AUTORIZA no fim do formulário.", "error"); const imgCliente = getImgCanvasTermo(canvasClienteRef); const imgProf = getImgCanvasTermo(canvasProfRef); const dadosAssinatura = await gerarAssinaturaEletronica(true); if (!dadosAssinatura) return; const payload = { paciente_id: form.id, tipo_documento: termoSelecionado?.titulo, status_assinatura: true, url_documento_assinado: { texto_acordado: termoSelecionado?.conteudo, respostas_extras: respostasTermo, autorizacao: autorizacaoTermo, cidade: cidadeTermo, data_assinatura: dataAssinatura, assinatura_cliente_desenho: imgCliente, assinatura_profissional_desenho: imgProf, assinatura_eletronica: dadosAssinatura } }; if (termoPreenchidoId) { const { data } = await supabase.from('documentos_legais').update(payload).eq('id', termoPreenchidoId).select().single(); if (data) { setHistoricoDocumentos(prev => prev.map(d => d.id === termoPreenchidoId ? data : d)); setFluxoDocumento('lista'); showToast('Termo atualizado.', 'success'); } } else { const { data } = await supabase.from('documentos_legais').insert([payload]).select().single(); if (data) { setHistoricoDocumentos(prev => [data, ...prev]); setFluxoDocumento('lista'); showToast('Termo guardado com sucesso.', 'success'); } } };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files.length > 0) setArquivoMidia(e.target.files[0]); };
-  const salvarNovaMidia = async () => { if (!arquivoMidia) return alert('Selecione uma foto.'); if (!formMidia.procedimento) return alert('Informe o procedimento.'); setUploadingMidia(true); try { const fileExt = arquivoMidia.name.split('.').pop(); const fileName = `${form.id}-${Date.now()}.${fileExt}`; const { error: uploadError } = await supabase.storage.from('midias').upload(fileName, arquivoMidia, { cacheControl: '3600', upsert: false }); if (uploadError) throw new Error(uploadError.message); const { data: publicUrlData } = supabase.storage.from('midias').getPublicUrl(fileName); const payload = { paciente_id: form.id, url_arquivo: publicUrlData.publicUrl, categoria: formMidia.categoria, procedimento: formMidia.procedimento, data_registro: formMidia.data_registro, observacoes: formMidia.observacoes }; const { data, error: dbError } = await supabase.from('paciente_midias').insert([payload]).select().single(); if (dbError) throw new Error(dbError.message); alert('Foto salva!'); setHistoricoMidias(prev => [data as Midia, ...prev]); setFluxoMidia('lista'); setArquivoMidia(null); setFormMidia({ ...formMidia, procedimento: '', observacoes: '' }); } catch (error: any) { alert(error.message); } finally { setUploadingMidia(false); } };
-  const deletarMidia = async (id: string, url_arquivo: string) => { if (window.confirm('Excluir foto?')) { await supabase.from('paciente_midias').delete().eq('id', id); try { const fileName = url_arquivo.split('/').pop(); if (fileName) await supabase.storage.from('midias').remove([fileName]); } catch (e) {} setHistoricoMidias(prev => prev.filter(m => m.id !== id)); } };
+  
+  const salvarNovaMidia = async () => { 
+    if (!arquivoMidia) return showToast('Selecione uma fotografia para adicionar.', 'error'); 
+    if (!formMidia.procedimento) return showToast('Preencha o nome do procedimento realizado.', 'error'); 
+    setUploadingMidia(true); 
+    try { 
+      const fileExt = arquivoMidia.name.split('.').pop(); 
+      const fileName = `${form.id}-${Date.now()}.${fileExt}`; 
+      const { error: uploadError } = await supabase.storage.from('midias').upload(fileName, arquivoMidia, { cacheControl: '3600', upsert: false }); 
+      if (uploadError) throw new Error(uploadError.message); 
+      const { data: publicUrlData } = supabase.storage.from('midias').getPublicUrl(fileName); 
+      const payload = { paciente_id: form.id, url_arquivo: publicUrlData.publicUrl, categoria: formMidia.categoria, procedimento: formMidia.procedimento, data_registro: formMidia.data_registro, observacoes: formMidia.observacoes }; 
+      const { data, error: dbError } = await supabase.from('paciente_midias').insert([payload]).select().single(); 
+      if (dbError) throw new Error(dbError.message); 
+      
+      showToast('Fotografia registada na evolução.', 'success'); 
+      setHistoricoMidias(prev => [data as Midia, ...prev]); 
+      setFluxoMidia('lista'); 
+      setArquivoMidia(null); 
+      setFormMidia({ ...formMidia, procedimento: '', observacoes: '' }); 
+    } catch (error: any) { 
+      showToast(error.message, 'error'); 
+    } finally { 
+      setUploadingMidia(false); 
+    } 
+  };
+
+  const deletarMidia = (id: string, url_arquivo: string) => { 
+    setConfirmDialog({
+      show: true, msg: 'Tem a certeza que deseja eliminar esta foto de evolução?',
+      action: async () => {
+        await supabase.from('paciente_midias').delete().eq('id', id); 
+        try { 
+          const fileName = url_arquivo.split('/').pop(); 
+          if (fileName) await supabase.storage.from('midias').remove([fileName]); 
+        } catch (e) {} 
+        setHistoricoMidias(prev => prev.filter(m => m.id !== id));
+        showToast('Foto removida.', 'success');
+        setConfirmDialog({ show: false, msg: '', action: null });
+      }
+    });
+  };
 
   const abrirPerfilPaciente = (paciente: Paciente) => { setForm(paciente); setIsEditing(true); setAbaAtiva('dados'); setFluxoAnamnese('lista'); setFluxoDocumento('lista'); setFluxoMidia('lista'); setHistoricoAnamneses([]); setHistoricoDocumentos([]); setHistoricoMidias([]); buscarHistoricoPaciente(paciente.id); buscarModelosDisponiveis(); setModalAberto(true); };
   const pacientesProcessados = pacientes.filter(p => p.nome_completo.toLowerCase().includes(busca.toLowerCase())).sort((a, b) => a.nome_completo.localeCompare(b.nome_completo));
 
   return (
-    <div className="w-full h-full p-4 md:p-8 mx-auto flex flex-col overflow-x-hidden box-border max-w-7xl">
+    <div className="w-full h-full p-4 md:p-8 mx-auto flex flex-col overflow-x-hidden box-border max-w-7xl relative">
       
-      {/* CABEÇALHO DA PÁGINA COM ALINHAMENTO PERFEITO */}
+      {/* TOAST CUSTOMIZADO (Aviso Flutuante) */}
+      {toast.show && (
+        <div className={`fixed top-6 right-6 z-[99999] flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl text-sm font-medium text-white border transition-all duration-300 transform translate-y-0 opacity-100 ${toast.type === 'success' ? 'bg-emerald-500 border-emerald-600' : 'bg-red-500 border-red-600'}`}>
+          {toast.type === 'success' ? (
+             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+          ) : (
+             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          )}
+          <span>{toast.msg}</span>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO CUSTOMIZADO (Substitui window.confirm) */}
+      {confirmDialog.show && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[99999] p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 max-w-sm w-full text-center transform transition-all">
+            <div className="w-14 h-14 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-5">
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 mb-2">Atenção!</h3>
+            <p className="text-sm text-gray-500 mb-8 px-2">{confirmDialog.msg}</p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setConfirmDialog({ show: false, msg: '', action: null })} className="px-5 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors w-1/2">Cancelar</button>
+              <button onClick={() => confirmDialog.action && confirmDialog.action()} className="px-5 py-2.5 text-sm font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors w-1/2 shadow-sm">Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CABEÇALHO DA PÁGINA */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 w-full shrink-0">
         <div>
           <h1 className="text-2xl md:text-3xl font-light text-gray-800">Pacientes</h1>
@@ -405,7 +517,7 @@ export default function Pacientes() {
             ))}
           </div>
 
-          {/* LAYOUT PARA COMPUTADOR (Tabela perfeitamente alinhada e proporcional) */}
+          {/* LAYOUT PARA COMPUTADOR */}
           <table className="hidden sm:table w-full text-left table-fixed">
             <thead className="bg-gray-50/50 text-gray-500 text-xs uppercase sticky top-0 border-b border-gray-200">
               <tr>
@@ -435,6 +547,7 @@ export default function Pacientes() {
         </div>
       </div>
 
+      {/* MODAL DE PERFIL/NOVO PACIENTE */}
       {modalAberto && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden mx-auto">
@@ -458,9 +571,8 @@ export default function Pacientes() {
                 <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-6">
                   <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Nome Completo *</label><input type="text" value={form.nome_completo || ''} onChange={e => setForm({...form, nome_completo: e.target.value})} className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-[#B68B40] outline-none" required /></div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">CPF</label><input type="text" value={form.cpf || ''} onChange={e => setForm({...form, cpf: formatarCPF(e.target.value)})} maxLength={14} className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-[#B68B40] outline-none" /></div>
-                    <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">RG</label><input type="text" value={form.rg || ''} onChange={e => setForm({...form, rg: e.target.value})} className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-[#B68B40] outline-none" /></div>
                     <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Data de Nascimento</label><input type="date" value={form.data_nascimento || ''} onChange={e => setForm({...form, data_nascimento: e.target.value})} className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-[#B68B40] outline-none text-gray-700" /></div>
                   </div>
 
@@ -486,11 +598,20 @@ export default function Pacientes() {
 
                     <div>
                       <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Estado (UF)</label>
-                      <input type="text" value={form.estado || ''} onChange={e => setForm({...form, estado: e.target.value})} maxLength={2} placeholder="Ex: MG" className="w-full md:w-32 border border-gray-300 rounded-lg p-3 text-sm focus:border-[#B68B40] outline-none uppercase" />
+                      <select 
+                        value={form.estado || ''} 
+                        onChange={e => setForm({...form, estado: e.target.value})} 
+                        className="w-full md:w-48 border border-gray-300 rounded-lg p-3 text-sm focus:border-[#B68B40] outline-none bg-white uppercase"
+                      >
+                        <option value="">Selecione...</option>
+                        {estadosBrasil.map(estado => (
+                          <option key={estado} value={estado}>{estado}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
-                  <div className="flex justify-end pt-4"><button onClick={salvarPaciente} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg text-sm font-medium hover:bg-[#9a7330] shadow-sm w-full md:w-auto">Guardar Dados</button></div>
+                  <div className="flex justify-end pt-4"><button onClick={salvarPaciente} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg text-sm font-medium hover:bg-[#9a7330] shadow-sm w-full md:w-auto transition-colors">Guardar Dados</button></div>
                 </div>
               )}
 
@@ -521,7 +642,7 @@ export default function Pacientes() {
                       <button onClick={() => setFluxoAnamnese('lista')} className="text-[#B68B40] text-sm hover:underline mb-6 block">← Voltar</button>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                         {modelosFichas.map(modelo => (
-                          <div key={modelo.id} onClick={() => iniciarNovaFicha(modelo)} className="p-5 border border-gray-200 rounded-xl hover:border-[#B68B40] cursor-pointer text-center bg-white"><div className="w-12 h-12 bg-[#B68B40]/10 text-[#B68B40] rounded-full flex items-center justify-center mx-auto mb-3 text-xl">📋</div><h4 className="font-medium text-gray-800">{modelo.titulo}</h4></div>
+                          <div key={modelo.id} onClick={() => iniciarNovaFicha(modelo)} className="p-5 border border-gray-200 rounded-xl hover:border-[#B68B40] cursor-pointer text-center bg-white transition-colors"><div className="w-12 h-12 bg-[#B68B40]/10 text-[#B68B40] rounded-full flex items-center justify-center mx-auto mb-3 text-xl">📋</div><h4 className="font-medium text-gray-800">{modelo.titulo}</h4></div>
                         ))}
                       </div>
                     </div>
@@ -580,7 +701,7 @@ export default function Pacientes() {
                             </div>
                           </div>
                         </div>
-                        <div className="flex justify-end mt-8"><button onClick={salvarFichaAnamnese} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm w-full md:w-auto">{fichaPreenchidaId ? 'Atualizar e Re-assinar Ficha' : 'Assinar Digitalmente e Salvar'}</button></div>
+                        <div className="flex justify-end mt-8"><button onClick={salvarFichaAnamnese} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm w-full md:w-auto transition-colors">{fichaPreenchidaId ? 'Atualizar e Re-assinar Ficha' : 'Assinar Digitalmente e Salvar'}</button></div>
                       </div>
                     </div>
                   )}
@@ -595,7 +716,7 @@ export default function Pacientes() {
                       <div className="space-y-3">
                         {historicoDocumentos.length === 0 ? ( <p className="text-gray-400 text-sm text-center py-12 border-2 border-dashed rounded-xl bg-gray-50">Nenhum termo assinado.</p> ) : (
                           historicoDocumentos.map((d) => (
-                            <div key={d.id} className="p-4 border border-gray-200 rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-gray-50/80 hover:bg-white">
+                            <div key={d.id} className="p-4 border border-gray-200 rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-gray-50/80 hover:bg-white transition-colors">
                               <div><p className="font-medium text-[#B68B40] text-base">{d.tipo_documento}</p><p className="text-xs text-gray-500 mt-1">Data: {new Date(d.url_documento_assinado.data_assinatura || d.created_at).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</p></div>
                               <div className="flex flex-wrap items-center gap-2 sm:gap-4">
                                 <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 hidden md:inline-block">Autenticado</span>
@@ -614,7 +735,7 @@ export default function Pacientes() {
                       <button onClick={() => setFluxoDocumento('lista')} className="text-[#B68B40] text-sm hover:underline mb-6">← Voltar</button>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {modelosTermos.map(termo => (
-                          <div key={termo.id} onClick={() => iniciarNovoTermo(termo)} className="p-5 border border-gray-200 rounded-xl hover:border-[#B68B40] cursor-pointer text-center group"><div className="text-2xl mb-2">🖋️</div><h4 className="font-medium text-gray-800 group-hover:text-[#B68B40]">{termo.titulo}</h4></div>
+                          <div key={termo.id} onClick={() => iniciarNovoTermo(termo)} className="p-5 border border-gray-200 rounded-xl hover:border-[#B68B40] cursor-pointer text-center group transition-colors"><div className="text-2xl mb-2">🖋️</div><h4 className="font-medium text-gray-800 group-hover:text-[#B68B40] transition-colors">{termo.titulo}</h4></div>
                         ))}
                       </div>
                     </div>
@@ -665,7 +786,7 @@ export default function Pacientes() {
                           </div>
                         </div>
 
-                        <div className="flex justify-end mt-10"><button onClick={salvarDocumentoTermo} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm w-full md:w-auto">{termoPreenchidoId ? 'Atualizar Termo' : 'Assinar Termo Oficialmente'}</button></div>
+                        <div className="flex justify-end mt-10"><button onClick={salvarDocumentoTermo} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm w-full md:w-auto transition-colors">{termoPreenchidoId ? 'Atualizar Termo' : 'Assinar Termo Oficialmente'}</button></div>
                       </div>
                     </div>
                   )}
@@ -695,14 +816,46 @@ export default function Pacientes() {
                       <button onClick={() => setFluxoMidia('lista')} className="text-[#B68B40] text-sm hover:underline mb-6 block">← Voltar para a galeria</button>
                       <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6 shadow-sm space-y-5">
                         <h2 className="text-xl font-light text-[#B68B40] text-center mb-4">Adicionar Nova Foto</h2>
+                        
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Etapa (Evolução) *</label><select value={formMidia.categoria} onChange={e => setFormMidia({...formMidia, categoria: e.target.value as any})} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-[#B68B40] outline-none bg-white"><option value="Antes">Antes do Procedimento</option><option value="Durante">Durante o Tratamento</option><option value="Depois">Depois (Resultado Final)</option></select></div>
                           <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Data da Foto *</label><input type="date" value={formMidia.data_registro} onChange={e => setFormMidia({...formMidia, data_registro: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-[#B68B40] outline-none" /></div>
                         </div>
+                        
                         <div><label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Procedimento *</label><input type="text" value={formMidia.procedimento} onChange={e => setFormMidia({...formMidia, procedimento: e.target.value})} placeholder="Ex: Lipo Enzimática de Papada" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-[#B68B40] outline-none" /></div>
-                        <div><label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Arquivo da Imagem *</label><input type="file" accept="image/*" onChange={handleFileChange} className="w-full border border-dashed border-gray-300 rounded-lg p-3 text-sm focus:border-[#B68B40] outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#B68B40]/10 file:text-[#B68B40] hover:file:bg-[#B68B40]/20 cursor-pointer" /></div>
+                        
+                        {/* OPÇÕES DUPLAS PARA A CÂMARA OU GALERIA */}
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Imagem da Evolução *</label>
+                          
+                          {/* Inputs invisíveis originais */}
+                          <input type="file" accept="image/*" capture="environment" id="cameraInput" onChange={handleFileChange} className="hidden" />
+                          <input type="file" accept="image/*" id="galleryInput" onChange={handleFileChange} className="hidden" />
+                          
+                          <div className="flex flex-col sm:flex-row gap-3">
+                            <label htmlFor="cameraInput" className="flex-1 flex items-center justify-center gap-2 bg-[#B68B40]/10 text-[#B68B40] hover:bg-[#B68B40]/20 border border-[#B68B40]/30 rounded-lg p-3 cursor-pointer transition-colors text-sm font-bold">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                              Tirar Foto na Hora
+                            </label>
+                            
+                            <label htmlFor="galleryInput" className="flex-1 flex items-center justify-center gap-2 bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200 rounded-lg p-3 cursor-pointer transition-colors text-sm font-medium">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                              Escolher da Galeria
+                            </label>
+                          </div>
+
+                          {/* Mensagem de sucesso quando a foto for selecionada */}
+                          {arquivoMidia && (
+                            <div className="mt-3 flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg">
+                              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                              <span className="truncate font-medium">Imagem selecionada: {arquivoMidia.name}</span>
+                            </div>
+                          )}
+                        </div>
+
                         <div><label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Observações Técnicas</label><textarea value={formMidia.observacoes} onChange={e => setFormMidia({...formMidia, observacoes: e.target.value})} placeholder="Ex: Paciente apresentou leve edema..." className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-[#B68B40] outline-none h-20" /></div>
-                        <div className="flex justify-end pt-4"><button onClick={salvarNovaMidia} disabled={uploadingMidia} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm disabled:opacity-50 w-full sm:w-auto">{uploadingMidia ? 'Enviando...' : 'Salvar Foto na Galeria'}</button></div>
+                        
+                        <div className="flex justify-end pt-4"><button onClick={salvarNovaMidia} disabled={uploadingMidia} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm disabled:opacity-50 w-full sm:w-auto transition-colors">{uploadingMidia ? 'Enviando...' : 'Salvar Foto na Galeria'}</button></div>
                       </div>
                     </div>
                   )}

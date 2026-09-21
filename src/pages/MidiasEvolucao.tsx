@@ -226,7 +226,7 @@ export default function MidiasEvolucao() {
                     <div className="flex justify-between items-center mt-auto pt-4 border-t border-gray-100">
                       <span className="text-[10px] text-gray-400 font-medium">Data: {new Date(midia.data_registro).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</span>
                       <div className="flex items-center gap-1 sm:gap-2">
-                        {/* Ícone de Download - Atualizado com a nova chamada */}
+                        {/* Ícone de Download */}
                         <button 
                           onClick={() => baixarImagem(midia.url_arquivo, midia.pacientes?.nome_completo || 'paciente', midia.categoria)} 
                           className="text-[#B68B40] hover:text-[#9a7330] p-1.5 rounded-md hover:bg-[#B68B40]/10 transition-colors" 
@@ -295,9 +295,33 @@ export default function MidiasEvolucao() {
                 <input type="text" value={form.procedimento} onChange={e => setForm({...form, procedimento: e.target.value})} placeholder="Ex: Lipo Enzimática de Papada" className="w-full border border-gray-300 rounded-lg p-2.5 sm:p-3 text-sm focus:border-[#B68B40] outline-none" />
               </div>
 
+              {/* OPÇÕES DUPLAS PARA A CÂMARA OU GALERIA */}
               <div>
-                <label className="block text-[10px] sm:text-xs font-bold text-gray-600 uppercase tracking-wider mb-1 sm:mb-2">Arquivo da Imagem *</label>
-                <input type="file" accept="image/*" onChange={handleFileChange} className="w-full border border-dashed border-gray-300 rounded-lg p-2 sm:p-3 text-sm focus:border-[#B68B40] outline-none file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-[#B68B40]/10 file:text-[#B68B40] hover:file:bg-[#B68B40]/20 bg-gray-50/50" />
+                <label className="block text-[10px] sm:text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Imagem da Evolução *</label>
+                
+                {/* Inputs invisíveis */}
+                <input type="file" accept="image/*" capture="environment" id="cameraInputGlobal" onChange={handleFileChange} className="hidden" />
+                <input type="file" accept="image/*" id="galleryInputGlobal" onChange={handleFileChange} className="hidden" />
+                
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <label htmlFor="cameraInputGlobal" className="flex-1 flex items-center justify-center gap-2 bg-[#B68B40]/10 text-[#B68B40] hover:bg-[#B68B40]/20 border border-[#B68B40]/30 rounded-lg p-3 cursor-pointer transition-colors text-sm font-bold">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    Tirar Foto na Hora
+                  </label>
+                  
+                  <label htmlFor="galleryInputGlobal" className="flex-1 flex items-center justify-center gap-2 bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200 rounded-lg p-3 cursor-pointer transition-colors text-sm font-medium">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                    Escolher da Galeria
+                  </label>
+                </div>
+
+                {/* Mensagem de sucesso quando a foto for selecionada */}
+                {arquivo && (
+                  <div className="mt-3 flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg">
+                    <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                    <span className="truncate font-medium">Imagem selecionada: {arquivo.name}</span>
+                  </div>
+                )}
               </div>
 
               <div>

@@ -17,16 +17,18 @@ export default function Dashboard() {
     procedimento: ''
   });
 
-  const [notificacao, setNotificacao] = useState<{ mensagem: string; tipo: 'sucesso' | 'erro' } | null>(null);
+  // ESTADO PARA OS AVISOS BONITOS (Toasts modernos)
+  const [toast, setToast] = useState<{ show: boolean, msg: string, type: 'success' | 'error' }>({ show: false, msg: '', type: 'success' });
 
   useEffect(() => {
     buscarDadosGerais();
     buscarPacientes();
   }, []);
 
-  const mostrarAviso = (mensagem: string, tipo: 'sucesso' | 'erro' = 'sucesso') => {
-    setNotificacao({ mensagem, tipo });
-    setTimeout(() => setNotificacao(null), 4000);
+  // FUNÇÃO PARA EXIBIR O TOAST (Aviso flutuante)
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ show: true, msg, type });
+    setTimeout(() => setToast(t => ({ ...t, show: false })), 3500);
   };
 
   const buscarDadosGerais = async () => {
@@ -62,11 +64,19 @@ export default function Dashboard() {
 
   const salvarAgendamento = async () => {
     if (!formAgenda.paciente_id || !formAgenda.data || !formAgenda.hora) {
-      return mostrarAviso('Preencha o Paciente, Data e Hora para agendar.', 'erro');
+      return showToast('Preencha o Paciente, Data e Hora para agendar.', 'error');
     }
     
     // Grava exatamente a string local no formato ISO sem conversão automática de fuso
     const dataHoraLocal = `${formAgenda.data}T${formAgenda.hora}:00`;
+
+    // VALIDAÇÃO PARA IMPEDIR AGENDAMENTOS NO PASSADO
+    const dataSelecionada = new Date(dataHoraLocal);
+    const dataAtual = new Date();
+    
+    if (dataSelecionada < dataAtual) {
+      return showToast('Não é possível agendar uma consulta numa data ou horário que já passou.', 'error');
+    }
 
     const payload = {
       paciente_id: formAgenda.paciente_id,
@@ -78,24 +88,30 @@ export default function Dashboard() {
     const { error } = await supabase.from('agendamentos').insert([payload]);
     
     if (error) {
-      mostrarAviso('Erro ao marcar agendamento: ' + error.message, 'erro');
+      showToast('Erro ao marcar agendamento: ' + error.message, 'error');
     } else {
-      mostrarAviso('Consulta agendada com sucesso!');
+      showToast('Consulta agendada com sucesso!', 'success');
       setModalAberto(false);
       setFormAgenda({ paciente_id: '', data: new Date().toISOString().split('T')[0], hora: '09:00', procedimento: '' });
       buscarDadosGerais();
     }
   };
 
+  // Obtém a data de hoje formatada em ISO (AAAA-MM-DD) para bloquear os dias passados no calendário HTML
+  const dataHojeIso = new Date().toISOString().split('T')[0];
+
   return (
     <div className="p-4 md:p-8 w-full max-w-7xl mx-auto flex flex-col h-full overflow-y-auto overflow-x-hidden box-border relative">
       
-      {notificacao && (
-        <div className={`fixed top-6 right-6 z-[999] px-6 py-3 rounded-xl shadow-lg border text-sm font-medium flex items-center gap-3 transition-all animate-bounce ${
-          notificacao.tipo === 'sucesso' ? 'bg-[#FDFCFB] border-[#B68B40] text-[#B68B40]' : 'bg-red-50 border-red-200 text-red-600'
-        }`}>
-          <span>{notificacao.tipo === 'sucesso' ? '✨' : '⚠️'}</span>
-          {notificacao.mensagem}
+      {/* TOAST CUSTOMIZADO (Aviso Flutuante Moderno) */}
+      {toast.show && (
+        <div className={`fixed top-6 right-6 z-[99999] flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl text-sm font-medium text-white border transition-all duration-300 transform translate-y-0 opacity-100 ${toast.type === 'success' ? 'bg-emerald-500 border-emerald-600' : 'bg-red-500 border-red-600'}`}>
+          {toast.type === 'success' ? (
+             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+          ) : (
+             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          )}
+          <span>{toast.msg}</span>
         </div>
       )}
 
@@ -134,7 +150,9 @@ export default function Dashboard() {
 
         {consultasHoje.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-400 opacity-70 py-10">
-            <div className="text-4xl sm:text-5xl mb-3">🗓️</div>
+            <svg className="w-12 h-12 sm:w-14 sm:h-14 mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
             <p className="text-sm">Nenhum agendamento para hoje.</p>
           </div>
         ) : (
@@ -160,8 +178,8 @@ export default function Dashboard() {
       </div>
 
       {modalAberto && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col mx-auto">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4" onClick={() => setModalAberto(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col mx-auto" onClick={e => e.stopPropagation()}>
             <div className="p-4 sm:p-5 border-b border-gray-100 flex justify-between items-center bg-[#FDFCFB]">
               <h2 className="text-lg font-medium text-[#B68B40]">Novo Agendamento</h2>
               <button onClick={() => setModalAberto(false)} className="text-gray-400 text-2xl hover:text-gray-700">&times;</button>
@@ -178,11 +196,22 @@ export default function Dashboard() {
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-[10px] sm:text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Data *</label>
-                  <input type="date" value={formAgenda.data} onChange={e => setFormAgenda({...formAgenda, data: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2.5 sm:p-3 text-sm focus:border-[#B68B40] outline-none bg-white" />
+                  <input 
+                    type="date" 
+                    min={dataHojeIso} // Impede de escolher dias no passado através do calendário
+                    value={formAgenda.data} 
+                    onChange={e => setFormAgenda({...formAgenda, data: e.target.value})} 
+                    className="w-full border border-gray-300 rounded-lg p-2.5 sm:p-3 text-sm focus:border-[#B68B40] outline-none bg-white" 
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] sm:text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Hora *</label>
-                  <input type="time" value={formAgenda.hora} onChange={e => setFormAgenda({...formAgenda, hora: e.target.value})} className="w-full border border-gray-300 rounded-lg p-2.5 sm:p-3 text-sm focus:border-[#B68B40] outline-none bg-white" />
+                  <input 
+                    type="time" 
+                    value={formAgenda.hora} 
+                    onChange={e => setFormAgenda({...formAgenda, hora: e.target.value})} 
+                    className="w-full border border-gray-300 rounded-lg p-2.5 sm:p-3 text-sm focus:border-[#B68B40] outline-none bg-white" 
+                  />
                 </div>
               </div>
               <div>
@@ -192,8 +221,8 @@ export default function Dashboard() {
             </div>
 
             <div className="p-4 sm:p-5 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
-              <button onClick={() => setModalAberto(false)} className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-800 bg-gray-200 sm:bg-transparent rounded-lg sm:rounded-none">Cancelar</button>
-              <button onClick={salvarAgendamento} className="bg-[#B68B40] text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-[#9a7330] shadow-sm">Confirmar</button>
+              <button onClick={() => setModalAberto(false)} className="px-4 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-800 bg-gray-200 sm:bg-transparent rounded-lg sm:rounded-none transition-colors">Cancelar</button>
+              <button onClick={salvarAgendamento} className="bg-[#B68B40] text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-[#9a7330] shadow-sm transition-colors">Confirmar</button>
             </div>
           </div>
         </div>
