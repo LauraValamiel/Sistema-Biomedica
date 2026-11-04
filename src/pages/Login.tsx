@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 
+// Mensagem única para qualquer falha: não revela se o e-mail/telefone existe (evita enumeração de contas)
+const ERRO_CREDENCIAIS = 'Credenciais inválidas. Verifique os dados e tente novamente.';
+
 export default function Login() {
   const navigate = useNavigate();
   const [identificador, setIdentificador] = useState('');
@@ -14,24 +17,21 @@ export default function Login() {
     setCarregando(true);
     setErro(null);
 
-    let emailParaLogin = identificador.trim();
+    let emailParaLogin = identificador.trim().toLowerCase();
 
     try {
-      // Se não contém '@', tratamos como telemóvel e buscamos na tabela perfis_usuario
+      // Sem '@': trata como telefone. A função email_para_login (security definer) devolve só o
+      // e-mail daquele número exato, sem expor a tabela perfis_usuario a quem não está logado.
       if (!emailParaLogin.includes('@')) {
-        // Remove formatação caso tenha colchetes ou traços, mantendo apenas números
         const telefoneLimpo = emailParaLogin.replace(/\D/g, '');
+        if (telefoneLimpo.length < 10) throw new Error(ERRO_CREDENCIAIS);
 
-        const { data: userData, error: userError } = await supabase
-          .from('perfis_usuario')
-          .select('email')
-          .eq('telefone', telefoneLimpo)
-          .maybeSingle();
+        const { data: emailEncontrado, error: rpcError } = await supabase.rpc('email_para_login', {
+          p_telefone: telefoneLimpo,
+        });
 
-        if (userError || !userData) {
-          throw new Error('Telemóvel não encontrado. Verifique o número inserido.');
-        }
-        emailParaLogin = userData.email;
+        if (rpcError || !emailEncontrado) throw new Error(ERRO_CREDENCIAIS);
+        emailParaLogin = emailEncontrado as string;
       }
 
       const { error: authError } = await supabase.auth.signInWithPassword({
@@ -39,11 +39,16 @@ export default function Login() {
         password: senha,
       });
 
-      if (authError) throw new Error('Senha incorreta ou credenciais inválidas.');
+      if (authError) {
+        // O Supabase limita tentativas seguidas; informa sem expor detalhes internos
+        if (authError.status === 429) throw new Error('Muitas tentativas. Aguarde alguns minutos e tente novamente.');
+        throw new Error(ERRO_CREDENCIAIS);
+      }
 
+      setSenha('');
       navigate('/');
     } catch (err: any) {
-      setErro(err.message || 'Ocorreu um erro ao entrar.');
+      setErro(err?.message || ERRO_CREDENCIAIS);
     } finally {
       setCarregando(false);
     }
@@ -60,29 +65,33 @@ export default function Login() {
         <p className="text-xs text-gray-400 mb-8">Gestão Clínica Profissional</p>
 
         {erro && (
-          <div className="w-full bg-red-50 border border-red-200 text-red-600 text-xs p-3 rounded-lg mb-4 text-center font-medium">
+          <div role="alert" className="w-full bg-red-50 border border-red-200 text-red-600 text-xs p-3 rounded-lg mb-4 text-center font-medium">
             {erro}
           </div>
         )}
 
         <form onSubmit={handleLogin} className="w-full space-y-4">
           <div>
-            <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">E-mail ou Telemóvel</label>
+            <label htmlFor="identificador" className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">E-mail ou Telefone</label>
             <input 
+              id="identificador"
               type="text" 
               required
+              autoComplete="username"
               value={identificador} 
               onChange={e => setIdentificador(e.target.value)}
-              placeholder="exemplo@email.com ou telemóvel" 
+              placeholder="exemplo@email.com ou (31) 90000-0000" 
               className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-[#B68B40] outline-none bg-white"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Senha</label>
+            <label htmlFor="senha" className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Senha</label>
             <input 
+              id="senha"
               type="password" 
               required
+              autoComplete="current-password"
               value={senha} 
               onChange={e => setSenha(e.target.value)}
               placeholder="••••••••" 
@@ -95,7 +104,7 @@ export default function Login() {
             disabled={carregando}
             className="w-full bg-[#B68B40] text-white py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm transition-colors mt-2 disabled:opacity-50"
           >
-            {carregando ? 'A entrar...' : 'Entrar no Sistema'}
+            {carregando ? 'Entrando...' : 'Entrar no Sistema'}
           </button>
         </form>
       </div>

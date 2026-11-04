@@ -2,6 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 // @ts-ignore
 import html2pdf from 'html2pdf.js';
+import {
+  BUCKET_MIDIAS,
+  cpfValido,
+  escapeHtml,
+  extrairCaminhoStorage,
+  gerarCaminhoMidia,
+  gerarUrlAssinada,
+  gerarUrlsAssinadas,
+  imagemAssinaturaSegura,
+  jsonCanonico,
+  prepararImagemSegura,
+  sanitizarNomeArquivo,
+  sha256Hex,
+} from '../lib/lgpd';
 
 type Paciente = { 
   id: string; 
@@ -23,6 +37,7 @@ type Campo = { id: string; label: string; tipo: string; opcoes?: string[] };
 type Secao = { titulo: string; campos: Campo[] };
 type ModeloFicha = { id: string; titulo: string; campos: Secao[] };
 type ModeloTermo = { id: string; titulo: string; conteudo: string; campos: Campo[] };
+// url_arquivo guarda apenas o CAMINHO no bucket privado (nunca uma URL pública)
 type Midia = { id: string; paciente_id: string; url_arquivo: string; categoria: 'Antes' | 'Durante' | 'Depois'; procedimento: string; data_registro: string; observacoes: string; };
 
 export default function Pacientes() {
@@ -55,9 +70,12 @@ export default function Pacientes() {
   const [termoPreenchidoId, setTermoPreenchidoId] = useState<string | null>(null);
   const [respostasTermo, setRespostasTermo] = useState<Record<string, any>>({});
   const [autorizacaoTermo, setAutorizacaoTermo] = useState<'Sim' | 'Não' | null>(null);
+  // Consentimento de uso de imagem SEPARADO do consentimento do procedimento (LGPD art. 8º §4º e art. 11, I)
+  const [autorizacaoImagem, setAutorizacaoImagem] = useState<'Sim' | 'Não' | null>(null);
   const [cidadeTermo, setCidadeTermo] = useState('João Monlevade - MG');
   
   const [historicoMidias, setHistoricoMidias] = useState<Midia[]>([]);
+  const [urlsMidias, setUrlsMidias] = useState<Record<string, string>>({});
   const [fluxoMidia, setFluxoMidia] = useState<'lista' | 'upload'>('lista');
   const [arquivoMidia, setArquivoMidia] = useState<File | null>(null);
   const [uploadingMidia, setUploadingMidia] = useState(false);
@@ -103,10 +121,26 @@ export default function Pacientes() {
     return "Declaro que as informações acima são verdadeiras e que não omiti qualquer informação importante sobre minha saúde.";
   };
 
+  // Rodapé de autenticação do PDF. Mostra o IP e a hora registrados pelo SERVIDOR (trigger no banco)
+  // quando existirem; documentos antigos continuam exibindo os dados que tinham.
+  const blocoAutenticacao = (auth: any, dupla: boolean) => {
+    const e = escapeHtml;
+    const servidor = auth?.registro_servidor;
+    const dataHora = servidor?.data_hora || auth?.data_hora_assinatura;
+    const ip = servidor?.ip || auth?.ip_dispositivo;
+    const linhaIp = ip ? ` | IP: ${e(ip)}` : '';
+    const linhaCpf = dupla
+      ? `CPF Paciente: ${e(auth?.cpf_paciente)} | Reg. Profissional: ${e(auth?.registro_profissional)}`
+      : `CPF Autenticado: ${e(auth?.cpf_assinante)}`;
+    const hashConteudo = auth?.hash_conteudo ? `<br/>Hash do conteúdo (SHA-256): ${e(auth.hash_conteudo)}` : '';
+    return `<div class="legal-hash"><strong>🔒 ${dupla ? 'AUTENTICAÇÃO DUPLA' : 'AUTENTICAÇÃO ELETRÔNICA'}</strong><br/>Data/Hora: ${dataHora ? e(new Date(dataHora).toLocaleString('pt-BR')) : ''}${linhaIp}<br/>${linhaCpf}<br/>Hash SHA-256: ${e(auth?.hash_autenticacao)}${hashConteudo}</div>`;
+  };
+
   const baixarPDF = async (tipo: 'ficha' | 'termo', item: any) => {
     setGerandoPdf(true);
     const tituloDoc = tipo === 'ficha' ? item.historico_medico?.tipo_ficha : item.tipo_documento;
-    const nomeArquivo = `${form.nome_completo} - ${tituloDoc}.pdf`;
+    const nomeArquivo = `${sanitizarNomeArquivo(`${form.nome_completo || 'paciente'} - ${tituloDoc || 'documento'}`)}.pdf`;
+    const e = escapeHtml; // todo dado digitado é escapado antes de entrar no HTML do PDF
 
     const enderecoCompleto = [
       form.rua ? `${form.rua}` : '',
@@ -159,7 +193,7 @@ export default function Pacientes() {
           <div class="contact-info">(31) 97224-1476 &nbsp;&nbsp;|&nbsp;&nbsp; dra.emilybarcelos</div>
           <div class="title-container">
             <div class="title-line"></div>
-            <div class="title-text"><span class="dot">•</span> ${tituloDoc} <span class="dot">•</span></div>
+            <div class="title-text"><span class="dot">•</span> ${e(tituloDoc)} <span class="dot">•</span></div>
             <div class="title-line"></div>
           </div>
         </div>
@@ -168,18 +202,18 @@ export default function Pacientes() {
           <div class="section-title">DADOS PESSOAIS</div>
           <table class="info-table">
             <tr>
-              <td colspan="2"><span class="label">Nome:</span> <span class="val">${form.nome_completo}</span></td>
+              <td colspan="2"><span class="label">Nome:</span> <span class="val">${e(form.nome_completo)}</span></td>
               <td colspan="1"><span class="label">Nascimento:</span> <span class="val">${form.data_nascimento ? new Date(form.data_nascimento).toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : ''}</span></td>
             </tr>
             <tr>
-              <td colspan="1" style="width: 40%;"><span class="label">CPF:</span> <span class="val">${form.cpf || ''}</span></td>
-              <td colspan="2"><span class="label">Telefone:</span> <span class="val">${form.telefone || ''}</span></td>
+              <td colspan="1" style="width: 40%;"><span class="label">CPF:</span> <span class="val">${e(form.cpf)}</span></td>
+              <td colspan="2"><span class="label">Telefone:</span> <span class="val">${e(form.telefone)}</span></td>
             </tr>
             <tr>
-              <td colspan="3"><span class="label">E-mail:</span> <span class="val">${form.email || ''}</span></td>
+              <td colspan="3"><span class="label">E-mail:</span> <span class="val">${e(form.email)}</span></td>
             </tr>
             <tr>
-              <td colspan="3"><span class="label">Endereço:</span> <span class="val">${enderecoCompleto}</span></td>
+              <td colspan="3"><span class="label">Endereço:</span> <span class="val">${e(enderecoCompleto)}</span></td>
             </tr>
           </table>
         </div>
@@ -198,7 +232,7 @@ export default function Pacientes() {
           
           html += `<div class="col-left">
             <div class="section-box" style="margin-bottom: 0;">
-              <div class="section-title">${secaoEsq.titulo}</div>
+              <div class="section-title">${e(secaoEsq.titulo)}</div>
               <table class="qa-table">
           `;
           secaoEsq.campos?.forEach(c => {
@@ -207,14 +241,14 @@ export default function Pacientes() {
              else if (resp === true) resp = 'Sim';
              else if (resp === false) resp = 'Não';
              if (!resp && resp !== false) resp = '---';
-             if (c.tipo === 'textarea' || (typeof resp === 'string' && resp.length > 30)) { html += `<tr><td colspan="2"><div class="question" style="width:100%;">${c.label}</div><div class="answer-long">${resp}</div></td></tr>`; } else { html += `<tr><td class="question">${c.label}</td><td class="answer">${resp}</td></tr>`; }
+             if (c.tipo === 'textarea' || (typeof resp === 'string' && resp.length > 30)) { html += `<tr><td colspan="2"><div class="question" style="width:100%;">${e(c.label)}</div><div class="answer-long">${e(resp)}</div></td></tr>`; } else { html += `<tr><td class="question">${e(c.label)}</td><td class="answer">${e(resp)}</td></tr>`; }
           });
           html += `</table></div></div>`;
 
           if (secaoDir) {
             html += `<div class="col-right">
               <div class="section-box" style="margin-bottom: 0;">
-                <div class="section-title">${secaoDir.titulo}</div>
+                <div class="section-title">${e(secaoDir.titulo)}</div>
                 <table class="qa-table">
             `;
             secaoDir.campos?.forEach(c => {
@@ -223,7 +257,7 @@ export default function Pacientes() {
                else if (resp === true) resp = 'Sim';
                else if (resp === false) resp = 'Não';
                if (!resp && resp !== false) resp = '---';
-               if (c.tipo === 'textarea' || (typeof resp === 'string' && resp.length > 30)) { html += `<tr><td colspan="2"><div class="question" style="width:100%;">${c.label}</div><div class="answer-long">${resp}</div></td></tr>`; } else { html += `<tr><td class="question">${c.label}</td><td class="answer">${resp}</td></tr>`; }
+               if (c.tipo === 'textarea' || (typeof resp === 'string' && resp.length > 30)) { html += `<tr><td colspan="2"><div class="question" style="width:100%;">${e(c.label)}</div><div class="answer-long">${e(resp)}</div></td></tr>`; } else { html += `<tr><td class="question">${e(c.label)}</td><td class="answer">${e(resp)}</td></tr>`; }
             });
             html += `</table></div></div>`;
           }
@@ -236,7 +270,7 @@ export default function Pacientes() {
         <div class="avoid-cut">
           <div class="section-box" style="margin-top: 5px;">
             <div class="section-title">DECLARAÇÃO</div>
-            <div class="termo-content">${obterTextoDeclaracao(item.historico_medico.tipo_ficha)}</div>
+            <div class="termo-content">${e(obterTextoDeclaracao(item.historico_medico.tipo_ficha || ''))}</div>
             
             <table class="info-table" style="margin-top: 15px;">
               <tr><td><span class="label">Data:</span> <span class="val">${item.historico_medico.data_assinatura ? new Date(item.historico_medico.data_assinatura).toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : ''}</span></td></tr>
@@ -245,9 +279,9 @@ export default function Pacientes() {
             <div class="signatures">
               <div class="sig-box" style="width: 100%;">
                 <div class="sig-line">
-                  ${item.historico_medico.assinatura_desenho ? `<img src="${item.historico_medico.assinatura_desenho}" class="sig-img" />` : ''}
+                  ${imagemAssinaturaSegura(item.historico_medico.assinatura_desenho) ? `<img src="${imagemAssinaturaSegura(item.historico_medico.assinatura_desenho)}" class="sig-img" />` : ''}
                 </div>
-                <p class="sig-name">${form.nome_completo}</p>
+                <p class="sig-name">${e(form.nome_completo)}</p>
                 <p class="sig-role">Assinatura do(a) Paciente</p>
               </div>
             </div>
@@ -255,8 +289,7 @@ export default function Pacientes() {
       `;
 
       if (item.historico_medico.assinatura_eletronica) {
-         const auth = item.historico_medico.assinatura_eletronica;
-         html += `<div class="legal-hash"><strong>🔒 AUTENTICAÇÃO ELETRÔNICA (MP 2.200-2/2001)</strong><br/>Data/Hora: ${new Date(auth.data_hora_assinatura).toLocaleString('pt-BR')} | IP: ${auth.ip_dispositivo} | CPF Autenticado: ${auth.cpf_assinante}<br/>Hash SHA-256: ${auth.hash_autenticacao}</div>`;
+         html += blocoAutenticacao(item.historico_medico.assinatura_eletronica, false);
       }
       html += `</div>`;
 
@@ -264,25 +297,35 @@ export default function Pacientes() {
        const docs = item.url_documento_assinado;
        const modeloOriginal = modelosTermos.find(m => m.titulo === item.tipo_documento);
        
-       html += `<div class="section-box" style="margin-top: 10px;"><div class="section-title">TERMO DE CONSENTIMENTO</div><div class="termo-content">${docs.texto_acordado}</div></div><div class="avoid-cut"><div class="section-box">`;
+       html += `<div class="section-box" style="margin-top: 10px;"><div class="section-title">TERMO DE CONSENTIMENTO</div><div class="termo-content">${e(docs.texto_acordado)}</div></div><div class="avoid-cut"><div class="section-box">`;
        
        if (docs.respostas_extras && Object.keys(docs.respostas_extras).length > 0) {
            html += `<table class="info-table" style="margin-top:5px; margin-bottom: 15px;">`;
-           for(let key in docs.respostas_extras) { let label = key; modeloOriginal?.campos?.forEach(c => { if(c.id === key) label = c.label; }); html += `<tr><td><span class="label">${label}:</span> <span class="val">${docs.respostas_extras[key]}</span></td></tr>`; }
+           for(let key in docs.respostas_extras) { let label = key; modeloOriginal?.campos?.forEach(c => { if(c.id === key) label = c.label; }); html += `<tr><td><span class="label">${e(label)}:</span> <span class="val">${e(docs.respostas_extras[key])}</span></td></tr>`; }
            html += `</table>`;
        }
 
-       html += `<div style="margin-top:10px; padding: 12px; border: 1.5px solid #D4B872; border-radius: 6px; text-align: center; background: #fffcf5; font-size: 11px; letter-spacing: 0.5px; color: #B68B40;"><strong>${docs.autorizacao === 'Sim' ? '✓ AUTORIZO' : '✗ NÃO AUTORIZO'} A REALIZAÇÃO DO PROCEDIMENTO E/OU USO DE MINHA IMAGEM</strong></div><table class="info-table" style="margin-top: 15px;"><tr><td style="width: 70%;"><span class="label">Cidade:</span> <span class="val">${docs.cidade}</span></td><td style="width: 30%;"><span class="label">Data:</span> <span class="val">${new Date(docs.data_assinatura).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</span></td></tr></table><div class="signatures"><div class="sig-box"><div class="sig-line">${docs.assinatura_cliente_desenho ? `<img src="${docs.assinatura_cliente_desenho}" class="sig-img" />` : ''}</div><p class="sig-name">${form.nome_completo}</p><p class="sig-role">Assinatura do(a) Paciente</p></div><div class="sig-box"><div class="sig-line">${docs.assinatura_profissional_desenho ? `<img src="${docs.assinatura_profissional_desenho}" class="sig-img" />` : ''}</div><p class="sig-name">Dra. Emily Barcelos</p><p class="sig-role">Biomédica Esteta</p></div></div></div>`;
+       const caixaAutorizacao = (texto: string) => `<div style="margin-top:10px; padding: 12px; border: 1.5px solid #D4B872; border-radius: 6px; text-align: center; background: #fffcf5; font-size: 11px; letter-spacing: 0.5px; color: #B68B40;"><strong>${texto}</strong></div>`;
+       if (docs.autorizacao_imagem) {
+         // Termos novos: consentimentos separados
+         html += caixaAutorizacao(`${docs.autorizacao === 'Sim' ? '✓ AUTORIZO' : '✗ NÃO AUTORIZO'} A REALIZAÇÃO DO PROCEDIMENTO`);
+         html += caixaAutorizacao(`${docs.autorizacao_imagem === 'Sim' ? '✓ AUTORIZO' : '✗ NÃO AUTORIZO'} O USO DE MINHA IMAGEM PARA DIVULGAÇÃO (revogável a qualquer momento)`);
+       } else {
+         // Termos antigos, assinados antes da separação dos consentimentos
+         html += caixaAutorizacao(`${docs.autorizacao === 'Sim' ? '✓ AUTORIZO' : '✗ NÃO AUTORIZO'} A REALIZAÇÃO DO PROCEDIMENTO E/OU USO DE MINHA IMAGEM`);
+       }
+       const sigCliente = imagemAssinaturaSegura(docs.assinatura_cliente_desenho);
+       const sigProf = imagemAssinaturaSegura(docs.assinatura_profissional_desenho);
+       html += `<table class="info-table" style="margin-top: 15px;"><tr><td style="width: 70%;"><span class="label">Cidade:</span> <span class="val">${e(docs.cidade)}</span></td><td style="width: 30%;"><span class="label">Data:</span> <span class="val">${docs.data_assinatura ? new Date(docs.data_assinatura).toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : ''}</span></td></tr></table><div class="signatures"><div class="sig-box"><div class="sig-line">${sigCliente ? `<img src="${sigCliente}" class="sig-img" />` : ''}</div><p class="sig-name">${e(form.nome_completo)}</p><p class="sig-role">Assinatura do(a) Paciente</p></div><div class="sig-box"><div class="sig-line">${sigProf ? `<img src="${sigProf}" class="sig-img" />` : ''}</div><p class="sig-name">Dra. Emily Barcelos</p><p class="sig-role">Biomédica Esteta</p></div></div></div>`;
 
        if (docs.assinatura_eletronica) {
-         const auth = docs.assinatura_eletronica;
-         html += `<div class="legal-hash"><strong>🔒 AUTENTICAÇÃO DUPLA (MP 2.200-2/2001)</strong><br/>Data/Hora: ${new Date(auth.data_hora_assinatura).toLocaleString('pt-BR')} | IP: ${auth.ip_dispositivo}<br/>CPF Paciente: ${auth.cpf_paciente} | Reg. Profissional: ${auth.registro_profissional}<br/>Hash SHA-256: ${auth.hash_autenticacao}</div>`;
-      }
+         html += blocoAutenticacao(docs.assinatura_eletronica, true);
+       }
       html += `</div>`;
     }
     html += `</div>`;
 
-    const opt = { margin: 15, filename: nomeArquivo, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: 'css', avoid: '.avoid-cut' } };
+    const opt = { margin: 15, filename: nomeArquivo, image: { type: 'jpeg' as const, quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }, pagebreak: { mode: 'css', avoid: '.avoid-cut' } };
     try { await html2pdf().set(opt).from(html).save(); } catch (error) { showToast("Ocorreu um erro ao gerar o PDF. Tente novamente.", "error"); } finally { setGerandoPdf(false); }
   };
 
@@ -296,23 +339,46 @@ export default function Pacientes() {
   const drawTermo = (e: React.MouseEvent | React.TouchEvent, tipo: 'cliente' | 'prof') => { const isDrawingTermo = tipo === 'cliente' ? isDrawingCliente : isDrawingProf; if (!isDrawingTermo) return; const canvas = tipo === 'cliente' ? canvasClienteRef.current : canvasProfRef.current; const ctx = canvas?.getContext('2d'); if (!canvas || !ctx) return; const rect = canvas.getBoundingClientRect(); const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX; const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY; ctx.lineTo(clientX - rect.left, clientY - rect.top); ctx.stroke(); };
   const stopDrawingTermo = (tipo: 'cliente' | 'prof') => tipo === 'cliente' ? setIsDrawingCliente(false) : setIsDrawingProf(false);
   const limparCanvasTermo = (tipo: 'cliente' | 'prof') => { const canvas = tipo === 'cliente' ? canvasClienteRef.current : canvasProfRef.current; canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height); };
-  const getImgCanvasTermo = (ref: React.RefObject<HTMLCanvasElement>) => ref.current?.toDataURL('image/png') || null;
+  const getImgCanvasTermo = (ref: React.RefObject<HTMLCanvasElement | null>) => ref.current?.toDataURL('image/png') || null;
 
   useEffect(() => { buscarPacientes(); buscarModelosDisponiveis(); }, []);
 
-  const buscarPacientes = async () => { setLoading(true); const { data } = await supabase.from('pacientes').select('*'); if (data) setPacientes(data); setLoading(false); };
+  // Minimização (LGPD art. 6º, III): a lista só carrega o que exibe. O cadastro completo
+  // é buscado apenas quando o prontuário de um paciente é aberto.
+  const buscarPacientes = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from('pacientes').select('id, nome_completo, telefone');
+    if (error) console.error('Erro ao buscar pacientes.');
+    if (data) setPacientes(data as Paciente[]);
+    setLoading(false);
+  };
+
   const buscarModelosDisponiveis = async () => { const { data: fichas } = await supabase.from('modelos_fichas').select('*').order('titulo', { ascending: true }); if (fichas) setModelosFichas(fichas); const { data: termos } = await supabase.from('modelos_termos').select('*').order('titulo', { ascending: true }); if (termos) setModelosTermos(termos); };
-  const buscarHistoricoPaciente = async (pacienteId: string) => { const { data: anamneses } = await supabase.from('fichas_anamnese').select('*').eq('paciente_id', pacienteId).order('created_at', { ascending: false }); if (anamneses) setHistoricoAnamneses(anamneses); const { data: documentos } = await supabase.from('documentos_legais').select('*').eq('paciente_id', pacienteId).order('created_at', { ascending: false }); if (documentos) setHistoricoDocumentos(documentos); const { data: midiasData } = await supabase.from('paciente_midias').select('*').eq('paciente_id', pacienteId).order('data_registro', { ascending: false }); if (midiasData) setHistoricoMidias(midiasData); };
+
+  const atualizarUrlsMidias = async (lista: Midia[]) => {
+    const urls = await gerarUrlsAssinadas(lista.map(m => extrairCaminhoStorage(m.url_arquivo)));
+    setUrlsMidias(urls);
+  };
+
+  const buscarHistoricoPaciente = async (pacienteId: string) => {
+    const { data: anamneses } = await supabase.from('fichas_anamnese').select('*').eq('paciente_id', pacienteId).order('created_at', { ascending: false });
+    if (anamneses) setHistoricoAnamneses(anamneses);
+    const { data: documentos } = await supabase.from('documentos_legais').select('*').eq('paciente_id', pacienteId).order('created_at', { ascending: false });
+    if (documentos) setHistoricoDocumentos(documentos);
+    const { data: midiasData } = await supabase.from('paciente_midias').select('*').eq('paciente_id', pacienteId).order('data_registro', { ascending: false });
+    if (midiasData) { setHistoricoMidias(midiasData); atualizarUrlsMidias(midiasData); }
+  };
   
   const salvarPaciente = async () => { 
     if (!form.nome_completo) return showToast('O Nome do paciente é obrigatório.', 'error'); 
+    if (form.cpf && !cpfValido(form.cpf)) return showToast('CPF inválido. Verifique os números digitados.', 'error');
     
     const payload = { 
-      nome_completo: form.nome_completo, 
+      nome_completo: form.nome_completo.trim(), 
       cpf: form.cpf || null, 
       data_nascimento: form.data_nascimento || null, 
       telefone: form.telefone || null, 
-      email: form.email || null, 
+      email: form.email?.trim() || null, 
       cep: form.cep || null,
       rua: form.rua || null,
       numero: form.numero || null,
@@ -323,12 +389,12 @@ export default function Pacientes() {
 
     if (isEditing && form.id) { 
       const { error } = await supabase.from('pacientes').update(payload).eq('id', form.id); 
-      if (error) { showToast('Erro ao atualizar: ' + error.message, 'error'); return; }
+      if (error) { console.error('Erro ao atualizar paciente.'); showToast('Não foi possível atualizar os dados. Tente novamente.', 'error'); return; }
       buscarPacientes(); 
       showToast('Paciente atualizado com sucesso!', 'success'); 
     } else { 
       const { data, error } = await supabase.from('pacientes').insert([{ ...payload, data_cadastro: new Date().toISOString() }]).select().single(); 
-      if (error) { showToast('Erro ao cadastrar: Verifique se as colunas foram criadas na base de dados.', 'error'); return; }
+      if (error) { console.error('Erro ao cadastrar paciente.'); showToast('Não foi possível cadastrar o paciente. Tente novamente.', 'error'); return; }
       if (data) { 
         buscarPacientes(); 
         setForm(data); 
@@ -342,74 +408,156 @@ export default function Pacientes() {
     e.stopPropagation();
     setConfirmDialog({
       show: true,
-      msg: 'Tem a certeza que deseja eliminar este paciente e todo o seu histórico? Esta ação é permanente.',
+      msg: 'Tem a certeza que deseja eliminar este paciente, as suas fotos e todo o seu histórico? Esta ação é permanente. Atenção: registros clínicos podem ter prazo legal mínimo de guarda.',
       action: async () => {
-        const { error } = await supabase.from('pacientes').delete().eq('id', id);
-        if (error) { showToast('Erro ao apagar: ' + error.message, 'error'); } 
-        else { setPacientes(prev => prev.filter(p => p.id !== id)); showToast('Paciente eliminado.', 'success'); }
         setConfirmDialog({ show: false, msg: '', action: null });
+
+        // 1º remove as fotos do storage (senão ficariam arquivos órfãos com dados de saúde)
+        const { data: midiasPaciente, error: erroLista } = await supabase.from('paciente_midias').select('id, url_arquivo').eq('paciente_id', id);
+        if (erroLista) { showToast('Não foi possível verificar as fotos do paciente. Nada foi apagado.', 'error'); return; }
+        const caminhos = (midiasPaciente || []).map(m => extrairCaminhoStorage(m.url_arquivo)).filter(Boolean);
+        if (caminhos.length > 0) {
+          const { error: erroStorage } = await supabase.storage.from(BUCKET_MIDIAS).remove(caminhos);
+          if (erroStorage) { showToast('Não foi possível apagar as fotos do paciente. Nada foi apagado.', 'error'); return; }
+          await supabase.from('paciente_midias').delete().eq('paciente_id', id);
+        }
+
+        const { error } = await supabase.from('pacientes').delete().eq('id', id);
+        if (error) { console.error('Erro ao apagar paciente.'); showToast('Não foi possível apagar o paciente. Tente novamente.', 'error'); } 
+        else { setPacientes(prev => prev.filter(p => p.id !== id)); showToast('Paciente eliminado.', 'success'); }
       }
     });
   };
 
-  const gerarAssinaturaEletronica = async (dupla = false) => { if (!termoAceito) { showToast("É necessário aceitar os termos de compromisso.", "error"); return null; } if (cpfAssinatura.length < 14) { showToast("O CPF do paciente está incompleto.", "error"); return null; } if (dupla) { if (!profAceito) { showToast("A Profissional precisa de confirmar a autenticação.", "error"); return null; } if (registroProfissional.length < 4) { showToast("O Registo da Profissional está incompleto.", "error"); return null; } } let ip = 'IP não identificado'; try { const response = await fetch('https://api.ipify.org?format=json'); const data = await response.json(); ip = data.ip; } catch (e) {} const userAgent = navigator.userAgent; const dataHora = new Date().toISOString(); const stringParaHash = dupla ? `PACIENTE:${cpfAssinatura}-PROF:${registroProfissional}-${dataHora}-${ip}-${userAgent}` : `${cpfAssinatura}-${dataHora}-${ip}-${userAgent}`; const msgBuffer = new TextEncoder().encode(stringParaHash); const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer); const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join(''); return { tipo: dupla ? 'eletronica_avancada_dupla' : 'eletronica_avancada', cpf_assinante: cpfAssinatura, cpf_paciente: cpfAssinatura, registro_profissional: registroProfissional, ip_dispositivo: ip, user_agent: userAgent, data_hora_assinatura: dataHora, hash_autenticacao: hashHex }; };
+  // Gera os dados de autenticação. O hash agora cobre o CONTEÚDO assinado (respostas, texto do termo,
+  // consentimentos e assinaturas desenhadas), então qualquer alteração posterior é detectável.
+  // O IP e a hora oficial NÃO são mais obtidos via serviço externo: um trigger no banco registra
+  // esses dados do lado do servidor (ver SQL), sem enviar o IP do paciente a terceiros.
+  const gerarAssinaturaEletronica = async (conteudo: unknown, dupla = false) => {
+    if (!termoAceito) { showToast("É necessário aceitar os termos de compromisso.", "error"); return null; }
+    if (!cpfValido(cpfAssinatura)) { showToast("O CPF do paciente é inválido ou está incompleto.", "error"); return null; }
+    if (dupla) {
+      if (!profAceito) { showToast("A Profissional precisa de confirmar a autenticação.", "error"); return null; }
+      if (registroProfissional.trim().length < 4) { showToast("O Registo da Profissional está incompleto.", "error"); return null; }
+    }
+    const userAgent = navigator.userAgent;
+    const dataHora = new Date().toISOString();
+    const hashConteudo = await sha256Hex(jsonCanonico(conteudo));
+    const hashAutenticacao = await sha256Hex(jsonCanonico({
+      hash_conteudo: hashConteudo,
+      cpf_paciente: cpfAssinatura,
+      registro_profissional: dupla ? registroProfissional.trim() : null,
+      data_hora: dataHora,
+      user_agent: userAgent,
+    }));
+    return {
+      tipo: dupla ? 'eletronica_dupla' : 'eletronica',
+      cpf_assinante: cpfAssinatura,
+      cpf_paciente: cpfAssinatura,
+      registro_profissional: dupla ? registroProfissional.trim() : '',
+      user_agent: userAgent,
+      data_hora_assinatura: dataHora,
+      hash_conteudo: hashConteudo,
+      hash_autenticacao: hashAutenticacao,
+    };
+  };
+
   const iniciarNovaFicha = (modelo: ModeloFicha) => { setFichaSelecionada(modelo); setRespostasAtuais({}); setDataAssinatura(new Date().toISOString().split('T')[0]); setFichaPreenchidaId(null); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoAnamnese('preenchendo'); setTimeout(limparAssinatura, 100); };
-  const editarFichaSalva = (fichaSalva: any) => { const modeloOriginal = modelosFichas.find(m => m.titulo === fichaSalva.historico_medico?.tipo_ficha); if (!modeloOriginal) return showToast('Modelo base desta ficha já não existe.', 'error'); setFichaSelecionada(modeloOriginal); setRespostasAtuais(fichaSalva.historico_medico?.respostas || {}); setDataAssinatura(fichaSalva.historico_medico?.data_assinatura || new Date().toISOString().split('T')[0]); setFichaPreenchidaId(fichaSalva.id); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoAnamnese('preenchendo'); setTimeout(() => { const ctx = canvasRef.current?.getContext('2d'); if (fichaSalva.historico_medico?.assinatura_desenho && ctx) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0); img.src = fichaSalva.historico_medico.assinatura_desenho; } else limparAssinatura(); }, 150); };
+  const editarFichaSalva = (fichaSalva: any) => { const modeloOriginal = modelosFichas.find(m => m.titulo === fichaSalva.historico_medico?.tipo_ficha); if (!modeloOriginal) return showToast('Modelo base desta ficha já não existe.', 'error'); setFichaSelecionada(modeloOriginal); setRespostasAtuais(fichaSalva.historico_medico?.respostas || {}); setDataAssinatura(fichaSalva.historico_medico?.data_assinatura || new Date().toISOString().split('T')[0]); setFichaPreenchidaId(fichaSalva.id); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoAnamnese('preenchendo'); setTimeout(() => { const ctx = canvasRef.current?.getContext('2d'); const sig = imagemAssinaturaSegura(fichaSalva.historico_medico?.assinatura_desenho); if (sig && ctx) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0); img.src = sig; } else limparAssinatura(); }, 150); };
   
   const excluirFichaSalva = (id: string) => { 
     setConfirmDialog({
       show: true, msg: 'Pretende mesmo eliminar esta ficha de anamnese?',
       action: async () => {
-        await supabase.from('fichas_anamnese').delete().eq('id', id); 
+        const { error } = await supabase.from('fichas_anamnese').delete().eq('id', id); 
+        setConfirmDialog({ show: false, msg: '', action: null });
+        if (error) return showToast('Não foi possível eliminar a ficha.', 'error');
         setHistoricoAnamneses(prev => prev.filter(f => f.id !== id));
         showToast('Ficha eliminada com sucesso.', 'success');
-        setConfirmDialog({ show: false, msg: '', action: null });
       }
     });
   };
 
-  const salvarFichaAnamnese = async () => { const imgDesenho = getImgCanvas(); const dadosAssinatura = await gerarAssinaturaEletronica(false); if (!dadosAssinatura) return; const payload = { paciente_id: form.id, historico_medico: { tipo_ficha: fichaSelecionada?.titulo, respostas: respostasAtuais, assinatura_desenho: imgDesenho, assinatura_eletronica: dadosAssinatura, data_assinatura: dataAssinatura, data_preenchimento: new Date().toISOString() } }; if (fichaPreenchidaId) { const { data } = await supabase.from('fichas_anamnese').update(payload).eq('id', fichaPreenchidaId).select().single(); if (data) { setHistoricoAnamneses(prev => prev.map(f => f.id === fichaPreenchidaId ? data : f)); setFluxoAnamnese('lista'); showToast('Ficha atualizada.', 'success'); } } else { const { data } = await supabase.from('fichas_anamnese').insert([payload]).select().single(); if (data) { setHistoricoAnamneses(prev => [data, ...prev]); setFluxoAnamnese('lista'); showToast('Ficha guardada com sucesso.', 'success'); } } };
+  // Documentos assinados são IMUTÁVEIS: "editar" gera uma NOVA versão assinada que referencia a anterior.
+  // A versão anterior é preservada, garantindo a integridade do que o paciente efetivamente assinou.
+  const salvarFichaAnamnese = async () => {
+    if (!form.id) return showToast('Guarde os dados do paciente antes de preencher a ficha.', 'error');
+    const imgDesenho = getImgCanvas();
+    const conteudo = { paciente_id: form.id, tipo_ficha: fichaSelecionada?.titulo, respostas: respostasAtuais, declaracao: obterTextoDeclaracao(fichaSelecionada?.titulo || ''), assinatura_desenho: imgDesenho, data_assinatura: dataAssinatura };
+    const dadosAssinatura = await gerarAssinaturaEletronica(conteudo, false);
+    if (!dadosAssinatura) return;
+    const payload = { paciente_id: form.id, historico_medico: { tipo_ficha: fichaSelecionada?.titulo, respostas: respostasAtuais, assinatura_desenho: imgDesenho, assinatura_eletronica: dadosAssinatura, data_assinatura: dataAssinatura, data_preenchimento: new Date().toISOString(), substitui_versao_id: fichaPreenchidaId || null } };
+    const { data, error } = await supabase.from('fichas_anamnese').insert([payload]).select().single();
+    if (error || !data) { console.error('Erro ao guardar ficha.'); return showToast('Não foi possível guardar a ficha. Tente novamente.', 'error'); }
+    setHistoricoAnamneses(prev => [data, ...prev]);
+    setFluxoAnamnese('lista');
+    showToast(fichaPreenchidaId ? 'Nova versão da ficha assinada e guardada.' : 'Ficha guardada com sucesso.', 'success');
+  };
 
-  const iniciarNovoTermo = (modelo: ModeloTermo) => { setTermoSelecionado(modelo); setRespostasTermo({}); setAutorizacaoTermo(null); setCidadeTermo('João Monlevade - MG'); setDataAssinatura(new Date().toISOString().split('T')[0]); setTermoPreenchidoId(null); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoDocumento('preenchendo'); setTimeout(() => { limparCanvasTermo('cliente'); limparCanvasTermo('prof'); }, 100); };
-  const editarTermoSalvo = (termoSalvo: any) => { const modeloOriginal = modelosTermos.find(m => m.titulo === termoSalvo.tipo_documento); if (!modeloOriginal) return showToast('Modelo não encontrado.', 'error'); const docs = termoSalvo.url_documento_assinado; setTermoSelecionado(modeloOriginal); setRespostasTermo(docs.respostas_extras || {}); setAutorizacaoTermo(docs.autorizacao || null); setCidadeTermo(docs.cidade || 'João Monlevade - MG'); setDataAssinatura(docs.data_assinatura || new Date().toISOString().split('T')[0]); setTermoPreenchidoId(termoSalvo.id); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoDocumento('preenchendo'); setTimeout(() => { const ctxC = canvasClienteRef.current?.getContext('2d'); const ctxP = canvasProfRef.current?.getContext('2d'); if (docs.assinatura_cliente_desenho && ctxC) { const img = new Image(); img.onload = () => ctxC.drawImage(img, 0, 0); img.src = docs.assinatura_cliente_desenho; } else limparCanvasTermo('cliente'); if (docs.assinatura_profissional_desenho && ctxP) { const img = new Image(); img.onload = () => ctxC.drawImage(img, 0, 0); img.src = docs.assinatura_profissional_desenho; } else limparCanvasTermo('prof'); }, 150); };
+  const iniciarNovoTermo = (modelo: ModeloTermo) => { setTermoSelecionado(modelo); setRespostasTermo({}); setAutorizacaoTermo(null); setAutorizacaoImagem(null); setCidadeTermo('João Monlevade - MG'); setDataAssinatura(new Date().toISOString().split('T')[0]); setTermoPreenchidoId(null); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoDocumento('preenchendo'); setTimeout(() => { limparCanvasTermo('cliente'); limparCanvasTermo('prof'); }, 100); };
+  const editarTermoSalvo = (termoSalvo: any) => { const modeloOriginal = modelosTermos.find(m => m.titulo === termoSalvo.tipo_documento); if (!modeloOriginal) return showToast('Modelo não encontrado.', 'error'); const docs = termoSalvo.url_documento_assinado; setTermoSelecionado(modeloOriginal); setRespostasTermo(docs.respostas_extras || {}); setAutorizacaoTermo(docs.autorizacao || null); setAutorizacaoImagem(docs.autorizacao_imagem || null); setCidadeTermo(docs.cidade || 'João Monlevade - MG'); setDataAssinatura(docs.data_assinatura || new Date().toISOString().split('T')[0]); setTermoPreenchidoId(termoSalvo.id); setTermoAceito(false); setCpfAssinatura(form.cpf || ''); setProfAceito(false); setRegistroProfissional(''); setFluxoDocumento('preenchendo'); setTimeout(() => { const ctxC = canvasClienteRef.current?.getContext('2d'); const ctxP = canvasProfRef.current?.getContext('2d'); const sigC = imagemAssinaturaSegura(docs.assinatura_cliente_desenho); const sigP = imagemAssinaturaSegura(docs.assinatura_profissional_desenho); if (sigC && ctxC) { const img = new Image(); img.onload = () => ctxC.drawImage(img, 0, 0); img.src = sigC; } else limparCanvasTermo('cliente'); if (sigP && ctxP) { const img = new Image(); img.onload = () => ctxP.drawImage(img, 0, 0); img.src = sigP; } else limparCanvasTermo('prof'); }, 150); };
   
   const excluirTermoSalvo = (id: string) => { 
     setConfirmDialog({
       show: true, msg: 'Excluir definitivamente este Termo de Consentimento?',
       action: async () => {
-        await supabase.from('documentos_legais').delete().eq('id', id); 
+        const { error } = await supabase.from('documentos_legais').delete().eq('id', id); 
+        setConfirmDialog({ show: false, msg: '', action: null });
+        if (error) return showToast('Não foi possível excluir o termo.', 'error');
         setHistoricoDocumentos(prev => prev.filter(d => d.id !== id));
         showToast('Termo excluído com sucesso.', 'success');
-        setConfirmDialog({ show: false, msg: '', action: null });
       }
     });
   };
 
-  const salvarDocumentoTermo = async () => { if (!autorizacaoTermo) return showToast("Assinale se o paciente AUTORIZA ou NÃO AUTORIZA no fim do formulário.", "error"); const imgCliente = getImgCanvasTermo(canvasClienteRef); const imgProf = getImgCanvasTermo(canvasProfRef); const dadosAssinatura = await gerarAssinaturaEletronica(true); if (!dadosAssinatura) return; const payload = { paciente_id: form.id, tipo_documento: termoSelecionado?.titulo, status_assinatura: true, url_documento_assinado: { texto_acordado: termoSelecionado?.conteudo, respostas_extras: respostasTermo, autorizacao: autorizacaoTermo, cidade: cidadeTermo, data_assinatura: dataAssinatura, assinatura_cliente_desenho: imgCliente, assinatura_profissional_desenho: imgProf, assinatura_eletronica: dadosAssinatura } }; if (termoPreenchidoId) { const { data } = await supabase.from('documentos_legais').update(payload).eq('id', termoPreenchidoId).select().single(); if (data) { setHistoricoDocumentos(prev => prev.map(d => d.id === termoPreenchidoId ? data : d)); setFluxoDocumento('lista'); showToast('Termo atualizado.', 'success'); } } else { const { data } = await supabase.from('documentos_legais').insert([payload]).select().single(); if (data) { setHistoricoDocumentos(prev => [data, ...prev]); setFluxoDocumento('lista'); showToast('Termo guardado com sucesso.', 'success'); } } };
+  const salvarDocumentoTermo = async () => {
+    if (!form.id) return showToast('Guarde os dados do paciente antes de assinar um termo.', 'error');
+    if (!autorizacaoTermo) return showToast("Assinale se o paciente AUTORIZA ou NÃO AUTORIZA a realização do procedimento.", "error");
+    if (!autorizacaoImagem) return showToast("Assinale se o paciente AUTORIZA ou NÃO AUTORIZA o uso da imagem para divulgação.", "error");
+    const imgCliente = getImgCanvasTermo(canvasClienteRef);
+    const imgProf = getImgCanvasTermo(canvasProfRef);
+    const conteudo = { paciente_id: form.id, tipo_documento: termoSelecionado?.titulo, texto_acordado: termoSelecionado?.conteudo, respostas_extras: respostasTermo, autorizacao: autorizacaoTermo, autorizacao_imagem: autorizacaoImagem, cidade: cidadeTermo, data_assinatura: dataAssinatura, assinatura_cliente_desenho: imgCliente, assinatura_profissional_desenho: imgProf };
+    const dadosAssinatura = await gerarAssinaturaEletronica(conteudo, true);
+    if (!dadosAssinatura) return;
+    const payload = { paciente_id: form.id, tipo_documento: termoSelecionado?.titulo, status_assinatura: true, url_documento_assinado: { texto_acordado: termoSelecionado?.conteudo, respostas_extras: respostasTermo, autorizacao: autorizacaoTermo, autorizacao_imagem: autorizacaoImagem, cidade: cidadeTermo, data_assinatura: dataAssinatura, assinatura_cliente_desenho: imgCliente, assinatura_profissional_desenho: imgProf, assinatura_eletronica: dadosAssinatura, substitui_versao_id: termoPreenchidoId || null } };
+    const { data, error } = await supabase.from('documentos_legais').insert([payload]).select().single();
+    if (error || !data) { console.error('Erro ao guardar termo.'); return showToast('Não foi possível guardar o termo. Tente novamente.', 'error'); }
+    setHistoricoDocumentos(prev => [data, ...prev]);
+    setFluxoDocumento('lista');
+    showToast(termoPreenchidoId ? 'Nova versão do termo assinada e guardada.' : 'Termo guardado com sucesso.', 'success');
+  };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files.length > 0) setArquivoMidia(e.target.files[0]); };
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files && e.target.files.length > 0) setArquivoMidia(e.target.files[0]); e.target.value = ''; };
   
   const salvarNovaMidia = async () => { 
+    if (!form.id) return showToast('Guarde os dados do paciente antes de adicionar fotos.', 'error');
     if (!arquivoMidia) return showToast('Selecione uma fotografia para adicionar.', 'error'); 
     if (!formMidia.procedimento) return showToast('Preencha o nome do procedimento realizado.', 'error'); 
     setUploadingMidia(true); 
+    let caminhoEnviado: string | null = null;
     try { 
-      const fileExt = arquivoMidia.name.split('.').pop(); 
-      const fileName = `${form.id}-${Date.now()}.${fileExt}`; 
-      const { error: uploadError } = await supabase.storage.from('midias').upload(fileName, arquivoMidia, { cacheControl: '3600', upsert: false }); 
-      if (uploadError) throw new Error(uploadError.message); 
-      const { data: publicUrlData } = supabase.storage.from('midias').getPublicUrl(fileName); 
-      const payload = { paciente_id: form.id, url_arquivo: publicUrlData.publicUrl, categoria: formMidia.categoria, procedimento: formMidia.procedimento, data_registro: formMidia.data_registro, observacoes: formMidia.observacoes }; 
+      // Remove metadados (GPS, aparelho, data) e padroniza em JPEG antes do envio
+      const imagemLimpa = await prepararImagemSegura(arquivoMidia);
+      const caminho = gerarCaminhoMidia(form.id);
+      const { error: uploadError } = await supabase.storage.from(BUCKET_MIDIAS).upload(caminho, imagemLimpa, { contentType: 'image/jpeg', cacheControl: '3600', upsert: false }); 
+      if (uploadError) throw new Error('Não foi possível enviar a foto. Tente novamente.'); 
+      caminhoEnviado = caminho;
+      const payload = { paciente_id: form.id, url_arquivo: caminho, categoria: formMidia.categoria, procedimento: formMidia.procedimento.trim(), data_registro: formMidia.data_registro, observacoes: formMidia.observacoes.trim() }; 
       const { data, error: dbError } = await supabase.from('paciente_midias').insert([payload]).select().single(); 
-      if (dbError) throw new Error(dbError.message); 
+      if (dbError || !data) throw new Error('Não foi possível registrar a foto no prontuário.'); 
+      caminhoEnviado = null;
       
       showToast('Fotografia registada na evolução.', 'success'); 
-      setHistoricoMidias(prev => [data as Midia, ...prev]); 
+      const novaLista = [data as Midia, ...historicoMidias];
+      setHistoricoMidias(novaLista); 
+      atualizarUrlsMidias(novaLista);
       setFluxoMidia('lista'); 
       setArquivoMidia(null); 
       setFormMidia({ ...formMidia, procedimento: '', observacoes: '' }); 
     } catch (error: any) { 
-      showToast(error.message, 'error'); 
+      // Se o arquivo subiu mas o registro falhou, remove o arquivo para não deixar foto órfã
+      if (caminhoEnviado) await supabase.storage.from(BUCKET_MIDIAS).remove([caminhoEnviado]);
+      showToast(error?.message || 'Ocorreu um erro ao salvar a foto.', 'error'); 
     } finally { 
       setUploadingMidia(false); 
     } 
@@ -419,19 +567,35 @@ export default function Pacientes() {
     setConfirmDialog({
       show: true, msg: 'Tem a certeza que deseja eliminar esta foto de evolução?',
       action: async () => {
-        await supabase.from('paciente_midias').delete().eq('id', id); 
-        try { 
-          const fileName = url_arquivo.split('/').pop(); 
-          if (fileName) await supabase.storage.from('midias').remove([fileName]); 
-        } catch (e) {} 
-        setHistoricoMidias(prev => prev.filter(m => m.id !== id));
-        showToast('Foto removida.', 'success');
         setConfirmDialog({ show: false, msg: '', action: null });
+        // 1º apaga o arquivo; só depois o registro
+        const caminho = extrairCaminhoStorage(url_arquivo);
+        if (caminho) {
+          const { error: erroStorage } = await supabase.storage.from(BUCKET_MIDIAS).remove([caminho]);
+          if (erroStorage) return showToast('Não foi possível apagar o arquivo da foto. Nada foi apagado.', 'error');
+        }
+        const { error } = await supabase.from('paciente_midias').delete().eq('id', id); 
+        if (error) showToast('O arquivo foi removido, mas houve um erro ao atualizar o prontuário.', 'error');
+        else showToast('Foto removida.', 'success');
+        setHistoricoMidias(prev => prev.filter(m => m.id !== id));
       }
     });
   };
 
-  const abrirPerfilPaciente = (paciente: Paciente) => { setForm(paciente); setIsEditing(true); setAbaAtiva('dados'); setFluxoAnamnese('lista'); setFluxoDocumento('lista'); setFluxoMidia('lista'); setHistoricoAnamneses([]); setHistoricoDocumentos([]); setHistoricoMidias([]); buscarHistoricoPaciente(paciente.id); buscarModelosDisponiveis(); setModalAberto(true); };
+  const ampliarMidia = async (url_arquivo: string) => {
+    // Link novo e de curta duração, aberto sem repassar a origem (noopener/noreferrer)
+    const url = await gerarUrlAssinada(extrairCaminhoStorage(url_arquivo));
+    if (!url) return showToast('Não foi possível abrir a foto.', 'error');
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const abrirPerfilPaciente = async (paciente: Paciente) => {
+    setForm(paciente); setIsEditing(true); setAbaAtiva('dados'); setFluxoAnamnese('lista'); setFluxoDocumento('lista'); setFluxoMidia('lista'); setHistoricoAnamneses([]); setHistoricoDocumentos([]); setHistoricoMidias([]); setUrlsMidias({}); setModalAberto(true);
+    // Carrega o cadastro completo apenas ao abrir o prontuário
+    const { data } = await supabase.from('pacientes').select('*').eq('id', paciente.id).single();
+    if (data) setForm(data);
+    buscarHistoricoPaciente(paciente.id); buscarModelosDisponiveis();
+  };
   const pacientesProcessados = pacientes.filter(p => p.nome_completo.toLowerCase().includes(busca.toLowerCase())).sort((a, b) => a.nome_completo.localeCompare(b.nome_completo));
 
   return (
@@ -553,7 +717,7 @@ export default function Pacientes() {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden mx-auto">
             <div className="p-4 md:p-5 border-b border-gray-100 flex justify-between items-center bg-[#FDFCFB] shrink-0">
               <h2 className="text-lg md:text-xl font-medium text-[#B68B40] truncate pr-4">{isEditing ? `Prontuário: ${form.nome_completo}` : 'Novo Paciente'}</h2>
-              <button onClick={() => setModalAberto(false)} className="text-gray-400 text-2xl shrink-0 hover:text-gray-600">&times;</button>
+              <button onClick={() => { setModalAberto(false); setForm({}); setHistoricoAnamneses([]); setHistoricoDocumentos([]); setHistoricoMidias([]); setUrlsMidias({}); }} className="text-gray-400 text-2xl shrink-0 hover:text-gray-600">&times;</button>
             </div>
 
             {isEditing && (
@@ -624,11 +788,11 @@ export default function Pacientes() {
                         {historicoAnamneses.length === 0 ? ( <p className="text-gray-400 text-sm text-center py-12 border-2 border-dashed rounded-xl bg-gray-50">Nenhuma ficha salva para este paciente.</p> ) : (
                           historicoAnamneses.map((f, index) => (
                             <div key={f.id || index} className="p-4 border border-gray-200 rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-gray-50/80 hover:bg-white transition-colors">
-                              <div><p className="font-medium text-[#B68B40] text-base">{f.historico_medico?.tipo_ficha || 'Ficha de Anamnese'}</p><p className="text-xs text-gray-500 mt-1">Data: {f.historico_medico?.data_assinatura ? new Date(f.historico_medico.data_assinatura).toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : new Date(f.created_at).toLocaleDateString('pt-BR')}</p></div>
+                              <div><p className="font-medium text-[#B68B40] text-base">{f.historico_medico?.tipo_ficha || 'Ficha de Anamnese'}{f.historico_medico?.substitui_versao_id && <span className="ml-2 text-[10px] font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full align-middle">Revisão</span>}</p><p className="text-xs text-gray-500 mt-1">Data: {f.historico_medico?.data_assinatura ? new Date(f.historico_medico.data_assinatura).toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : new Date(f.created_at).toLocaleDateString('pt-BR')}</p></div>
                               <div className="flex flex-wrap items-center gap-2 sm:gap-4">
                                 <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 hidden md:inline-block">Autenticado</span>
                                 <button onClick={() => baixarPDF('ficha', f)} className="text-[#B68B40] text-sm font-medium hover:underline px-2 sm:border-l border-gray-300">Baixar PDF</button>
-                                <button onClick={() => editarFichaSalva(f)} className="text-[#B68B40] text-sm font-medium hover:underline px-2 border-l border-gray-300">Ver / Editar</button>
+                                <button onClick={() => editarFichaSalva(f)} className="text-[#B68B40] text-sm font-medium hover:underline px-2 border-l border-gray-300">Ver / Nova versão</button>
                                 <button onClick={() => excluirFichaSalva(f.id)} className="text-red-500 text-sm font-medium hover:underline px-2 border-l border-gray-300">Excluir</button>
                               </div>
                             </div>
@@ -701,7 +865,7 @@ export default function Pacientes() {
                             </div>
                           </div>
                         </div>
-                        <div className="flex justify-end mt-8"><button onClick={salvarFichaAnamnese} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm w-full md:w-auto transition-colors">{fichaPreenchidaId ? 'Atualizar e Re-assinar Ficha' : 'Assinar Digitalmente e Salvar'}</button></div>
+                        <div className="flex justify-end mt-8"><button onClick={salvarFichaAnamnese} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm w-full md:w-auto transition-colors">{fichaPreenchidaId ? 'Assinar Nova Versão da Ficha' : 'Assinar Digitalmente e Salvar'}</button></div>
                       </div>
                     </div>
                   )}
@@ -717,11 +881,11 @@ export default function Pacientes() {
                         {historicoDocumentos.length === 0 ? ( <p className="text-gray-400 text-sm text-center py-12 border-2 border-dashed rounded-xl bg-gray-50">Nenhum termo assinado.</p> ) : (
                           historicoDocumentos.map((d) => (
                             <div key={d.id} className="p-4 border border-gray-200 rounded-xl flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-gray-50/80 hover:bg-white transition-colors">
-                              <div><p className="font-medium text-[#B68B40] text-base">{d.tipo_documento}</p><p className="text-xs text-gray-500 mt-1">Data: {new Date(d.url_documento_assinado.data_assinatura || d.created_at).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</p></div>
+                              <div><p className="font-medium text-[#B68B40] text-base">{d.tipo_documento}{d.url_documento_assinado?.substitui_versao_id && <span className="ml-2 text-[10px] font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full align-middle">Revisão</span>}</p><p className="text-xs text-gray-500 mt-1">Data: {new Date(d.url_documento_assinado.data_assinatura || d.created_at).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</p></div>
                               <div className="flex flex-wrap items-center gap-2 sm:gap-4">
                                 <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 hidden md:inline-block">Autenticado</span>
                                 <button onClick={() => baixarPDF('termo', d)} className="text-[#B68B40] text-sm font-medium hover:underline px-2 sm:border-l border-gray-300">Baixar PDF</button>
-                                <button onClick={() => editarTermoSalvo(d)} className="text-[#B68B40] text-sm font-medium hover:underline px-2 border-l border-gray-300">Ver / Editar</button>
+                                <button onClick={() => editarTermoSalvo(d)} className="text-[#B68B40] text-sm font-medium hover:underline px-2 border-l border-gray-300">Ver / Nova versão</button>
                                 <button onClick={() => excluirTermoSalvo(d.id)} className="text-red-500 text-sm font-medium hover:underline px-2 border-l border-gray-300">Excluir</button>
                               </div>
                             </div>
@@ -758,11 +922,21 @@ export default function Pacientes() {
                           </div>
                         )}
 
-                        <div className="border border-gray-200 rounded-lg p-4 md:p-5 mb-8">
+                        <div className="border border-gray-200 rounded-lg p-4 md:p-5 mb-4">
                           <p className="text-gray-800 font-medium mb-4 text-sm md:text-base">Estou ciente de que os resultados podem variar de acordo com cada organismo e que a realização do procedimento não representa garantia de resultado específico.</p>
                           <div className="flex flex-col gap-3">
-                            <label className="flex items-center gap-3 cursor-pointer text-sm font-bold text-gray-700"><input type="radio" name="autorizacao" value="Sim" checked={autorizacaoTermo === 'Sim'} onChange={() => setAutorizacaoTermo('Sim')} className="w-5 h-5 accent-[#B68B40] shrink-0"/> AUTORIZO a realização do procedimento / uso de imagem</label>
-                            <label className="flex items-center gap-3 cursor-pointer text-sm font-bold text-gray-700"><input type="radio" name="autorizacao" value="Não" checked={autorizacaoTermo === 'Não'} onChange={() => setAutorizacaoTermo('Não')} className="w-5 h-5 accent-red-500 shrink-0"/> NÃO AUTORIZO a realização do procedimento / uso de imagem</label>
+                            <label className="flex items-center gap-3 cursor-pointer text-sm font-bold text-gray-700"><input type="radio" name="autorizacao" value="Sim" checked={autorizacaoTermo === 'Sim'} onChange={() => setAutorizacaoTermo('Sim')} className="w-5 h-5 accent-[#B68B40] shrink-0"/> AUTORIZO a realização do procedimento</label>
+                            <label className="flex items-center gap-3 cursor-pointer text-sm font-bold text-gray-700"><input type="radio" name="autorizacao" value="Não" checked={autorizacaoTermo === 'Não'} onChange={() => setAutorizacaoTermo('Não')} className="w-5 h-5 accent-red-500 shrink-0"/> NÃO AUTORIZO a realização do procedimento</label>
+                          </div>
+                        </div>
+
+                        {/* CONSENTIMENTO DE IMAGEM SEPARADO (LGPD art. 8º §4º e art. 11, I) */}
+                        <div className="border border-gray-200 rounded-lg p-4 md:p-5 mb-8">
+                          <p className="text-gray-800 font-medium mb-2 text-sm md:text-base">Uso de imagem para divulgação</p>
+                          <p className="text-gray-600 mb-4 text-xs md:text-sm leading-relaxed">As fotos de antes, durante e depois são registradas no prontuário para acompanhamento clínico. Separadamente, autorizo ou não o uso das minhas imagens em redes sociais, portfólio e materiais de divulgação da profissional. Esta escolha não interfere na realização do procedimento e posso revogá-la a qualquer momento, mediante solicitação.</p>
+                          <div className="flex flex-col gap-3">
+                            <label className="flex items-center gap-3 cursor-pointer text-sm font-bold text-gray-700"><input type="radio" name="autorizacao_imagem" value="Sim" checked={autorizacaoImagem === 'Sim'} onChange={() => setAutorizacaoImagem('Sim')} className="w-5 h-5 accent-[#B68B40] shrink-0"/> AUTORIZO o uso da minha imagem para divulgação</label>
+                            <label className="flex items-center gap-3 cursor-pointer text-sm font-bold text-gray-700"><input type="radio" name="autorizacao_imagem" value="Não" checked={autorizacaoImagem === 'Não'} onChange={() => setAutorizacaoImagem('Não')} className="w-5 h-5 accent-red-500 shrink-0"/> NÃO AUTORIZO o uso da minha imagem para divulgação</label>
                           </div>
                         </div>
 
@@ -786,7 +960,7 @@ export default function Pacientes() {
                           </div>
                         </div>
 
-                        <div className="flex justify-end mt-10"><button onClick={salvarDocumentoTermo} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm w-full md:w-auto transition-colors">{termoPreenchidoId ? 'Atualizar Termo' : 'Assinar Termo Oficialmente'}</button></div>
+                        <div className="flex justify-end mt-10"><button onClick={salvarDocumentoTermo} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg font-bold text-sm hover:bg-[#9a7330] shadow-sm w-full md:w-auto transition-colors">{termoPreenchidoId ? 'Assinar Nova Versão do Termo' : 'Assinar Termo Oficialmente'}</button></div>
                       </div>
                     </div>
                   )}
@@ -803,7 +977,7 @@ export default function Pacientes() {
                           {historicoMidias.map(midia => (
                             <div key={midia.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all group relative">
                               <div className={`absolute top-2 left-2 px-3 py-1 rounded-full text-xs font-bold text-white shadow-sm z-10 ${ midia.categoria === 'Antes' ? 'bg-gray-600' : midia.categoria === 'Depois' ? 'bg-[#B68B40]' : 'bg-emerald-600'}`}>{midia.categoria}</div>
-                              <div className="h-40 w-full bg-gray-100 relative"><img src={midia.url_arquivo} alt="Evolução" className="w-full h-full object-cover" /><div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><button onClick={() => window.open(midia.url_arquivo, '_blank')} className="text-white text-xs font-medium border border-white px-3 py-1.5 rounded hover:bg-white hover:text-black transition-colors">Ampliar Foto</button></div></div>
+                              <div className="h-40 w-full bg-gray-100 relative">{urlsMidias[extrairCaminhoStorage(midia.url_arquivo)] ? (<img src={urlsMidias[extrairCaminhoStorage(midia.url_arquivo)]} alt="Evolução" className="w-full h-full object-cover" referrerPolicy="no-referrer" />) : (<div className="w-full h-full flex items-center justify-center text-xs text-gray-400">Imagem indisponível</div>)}<div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><button onClick={() => ampliarMidia(midia.url_arquivo)} className="text-white text-xs font-medium border border-white px-3 py-1.5 rounded hover:bg-white hover:text-black transition-colors">Ampliar Foto</button></div></div>
                               <div className="p-3"><p className="text-sm font-bold text-gray-800 truncate">{midia.procedimento}</p><p className="text-[11px] text-gray-500 mt-1 truncate">{midia.observacoes || 'Sem observações extras'}</p><div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-100"><span className="text-[10px] text-gray-400 font-medium">Data: {new Date(midia.data_registro).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</span><button onClick={() => deletarMidia(midia.id, midia.url_arquivo)} className="text-red-400 hover:text-red-600 text-xs">Excluir</button></div></div>
                             </div>
                           ))}

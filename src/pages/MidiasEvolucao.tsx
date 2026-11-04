@@ -1,10 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import {
+  BUCKET_MIDIAS,
+  extrairCaminhoStorage,
+  gerarCaminhoMidia,
+  gerarUrlAssinada,
+  gerarUrlsAssinadas,
+  prepararImagemSegura,
+  sanitizarNomeArquivo,
+} from '../lib/lgpd';
 
 type Paciente = { id: string; nome_completo: string; };
 type Midia = {
   id: string;
   paciente_id: string;
+  // A coluna mantém o nome antigo, mas agora guarda apenas o CAMINHO do arquivo
+  // dentro do bucket privado (ex.: "uuid-do-paciente/uuid-da-foto.jpg"), nunca uma URL pública.
   url_arquivo: string;
   categoria: 'Antes' | 'Durante' | 'Depois';
   procedimento: string;
@@ -17,6 +28,9 @@ export default function MidiasEvolucao() {
   const [midias, setMidias] = useState<Midia[]>([]);
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Links temporários (assinados) para exibir as fotos: caminho -> URL
+  const [urlsAssinadas, setUrlsAssinadas] = useState<Record<string, string>>({});
   
   // Filtros
   const [filtroPaciente, setFiltroPaciente] = useState('');
@@ -47,11 +61,16 @@ export default function MidiasEvolucao() {
     setLoading(true);
     const { data: midiasData, error: midiasError } = await supabase
       .from('paciente_midias')
-      .select('*, pacientes(nome_completo)')
+      .select('id, paciente_id, url_arquivo, categoria, procedimento, data_registro, observacoes, pacientes(nome_completo)')
       .order('data_registro', { ascending: false });
       
-    if (midiasData) setMidias(midiasData as any);
-    if (midiasError) console.error('Erro ao buscar mídias:', midiasError);
+    if (midiasError) console.error('Erro ao buscar mídias.');
+    if (midiasData) {
+      const lista = midiasData as unknown as Midia[];
+      setMidias(lista);
+      const urls = await gerarUrlsAssinadas(lista.map(m => extrairCaminhoStorage(m.url_arquivo)));
+      setUrlsAssinadas(urls);
+    }
 
     const { data: pacData } = await supabase.from('pacientes').select('id, nome_completo').order('nome_completo');
     if (pacData) setPacientes(pacData);
@@ -63,6 +82,8 @@ export default function MidiasEvolucao() {
     if (e.target.files && e.target.files.length > 0) {
       setArquivo(e.target.files[0]);
     }
+    // Permite selecionar o mesmo arquivo de novo, se necessário
+    e.target.value = '';
   };
 
   const salvarMidia = async () => {
@@ -71,33 +92,34 @@ export default function MidiasEvolucao() {
     if (!form.procedimento) return alert('Informe o nome do procedimento.');
 
     setUploading(true);
+    let caminhoEnviado: string | null = null;
 
     try {
-      const fileExt = arquivo.name.split('.').pop();
-      const fileName = `${form.paciente_id}-${Date.now()}.${fileExt}`;
+      // Remove metadados (GPS, aparelho, data) e padroniza em JPEG
+      const imagemLimpa = await prepararImagemSegura(arquivo);
+      const caminho = gerarCaminhoMidia(form.paciente_id);
 
-      const { error: uploadError } = await supabase.storage.from('midias').upload(fileName, arquivo, {
+      const { error: uploadError } = await supabase.storage.from(BUCKET_MIDIAS).upload(caminho, imagemLimpa, {
+        contentType: 'image/jpeg',
         cacheControl: '3600',
         upsert: false
       });
-
-      if (uploadError) throw new Error(`Erro no upload: ${uploadError.message}`);
-
-      const { data: publicUrlData } = supabase.storage.from('midias').getPublicUrl(fileName);
+      if (uploadError) throw new Error('Não foi possível enviar a foto. Tente novamente.');
+      caminhoEnviado = caminho;
 
       const payload = {
         paciente_id: form.paciente_id,
-        url_arquivo: publicUrlData.publicUrl,
+        url_arquivo: caminho, // apenas o caminho no bucket privado
         categoria: form.categoria,
-        procedimento: form.procedimento,
+        procedimento: form.procedimento.trim(),
         data_registro: form.data_registro,
-        observacoes: form.observacoes
+        observacoes: form.observacoes.trim()
       };
 
       const { error: dbError } = await supabase.from('paciente_midias').insert([payload]);
-      
-      if (dbError) throw new Error(`Erro ao salvar no banco: ${dbError.message}`);
+      if (dbError) throw new Error('Não foi possível registrar a foto no prontuário.');
 
+      caminhoEnviado = null;
       alert('Foto salva com sucesso!');
       setModalAberto(false);
       setArquivo(null);
@@ -105,40 +127,48 @@ export default function MidiasEvolucao() {
       buscarDados();
 
     } catch (error: any) {
-      alert(error.message);
+      // Se o arquivo subiu mas o registro falhou, remove o arquivo para não deixar foto órfã
+      if (caminhoEnviado) await supabase.storage.from(BUCKET_MIDIAS).remove([caminhoEnviado]);
+      alert(error?.message || 'Ocorreu um erro ao salvar a foto.');
     } finally {
       setUploading(false);
     }
   };
 
   const deletarMidia = async (id: string, url_arquivo: string) => {
-    if (window.confirm('Tem certeza que deseja excluir esta foto permanentemente?')) {
-      await supabase.from('paciente_midias').delete().eq('id', id);
-      try {
-        const fileName = url_arquivo.split('/').pop();
-        if (fileName) await supabase.storage.from('midias').remove([fileName]);
-      } catch (e) {}
-      buscarDados();
+    if (!window.confirm('Tem certeza que deseja excluir esta foto permanentemente?')) return;
+
+    // 1º apaga o arquivo; só depois o registro (evita arquivo órfão sem controle)
+    const caminho = extrairCaminhoStorage(url_arquivo);
+    if (caminho) {
+      const { error: storageError } = await supabase.storage.from(BUCKET_MIDIAS).remove([caminho]);
+      if (storageError) return alert('Não foi possível excluir o arquivo da foto. Nada foi apagado.');
     }
+
+    const { error } = await supabase.from('paciente_midias').delete().eq('id', id);
+    if (error) alert('O arquivo foi removido, mas houve um erro ao atualizar o prontuário.');
+    buscarDados();
   };
 
-  const baixarImagem = async (url: string, nomePaciente: string, categoria: string) => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      // Adicionado a "categoria" ao nome do ficheiro gerado
-      link.download = `Evolucao_${categoria}_${nomePaciente.replace(/\s+/g, '_')}_${Date.now()}.jpg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-    } catch (error) {
-      // Fallback: se o navegador bloquear o download direto por causa do CORS, abre num separador novo
-      window.open(url, '_blank');
-    }
+  const ampliarImagem = async (url_arquivo: string) => {
+    // Gera um link novo e curto na hora de ampliar (o da galeria pode já ter expirado)
+    const url = await gerarUrlAssinada(extrairCaminhoStorage(url_arquivo));
+    if (!url) return alert('Não foi possível abrir a foto. Recarregue a página.');
+    setMidiaAmpliada(url);
+  };
+
+  const baixarImagem = async (url_arquivo: string, nomePaciente: string, categoria: string) => {
+    const nomeArquivo = `${sanitizarNomeArquivo(`Evolucao_${categoria}_${nomePaciente}`)}_${Date.now()}.jpg`;
+    const url = await gerarUrlAssinada(extrairCaminhoStorage(url_arquivo), nomeArquivo);
+    if (!url) return alert('Não foi possível baixar a foto. Recarregue a página.');
+
+    // O link assinado já força o download com o nome escolhido
+    const link = document.createElement('a');
+    link.href = url;
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const midiasFiltradas = midias.filter(m => {
@@ -210,9 +240,13 @@ export default function MidiasEvolucao() {
                   {/* Imagem Clicável (Abre no Visualizador Interno) */}
                   <div 
                     className="h-48 sm:h-56 w-full bg-gray-100 relative shrink-0 cursor-pointer"
-                    onClick={() => setMidiaAmpliada(midia.url_arquivo)}
+                    onClick={() => ampliarImagem(midia.url_arquivo)}
                   >
-                    <img src={midia.url_arquivo} alt="Evolução" className="w-full h-full object-cover" />
+                    {urlsAssinadas[extrairCaminhoStorage(midia.url_arquivo)] ? (
+                      <img src={urlsAssinadas[extrairCaminhoStorage(midia.url_arquivo)]} alt="Evolução" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">Imagem indisponível</div>
+                    )}
                     <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <svg className="w-8 h-8 text-white drop-shadow-md" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" /></svg>
                     </div>
@@ -324,6 +358,10 @@ export default function MidiasEvolucao() {
                 )}
               </div>
 
+              <p className="text-[11px] text-gray-500 bg-gray-50 border border-gray-100 rounded-lg p-2.5 leading-relaxed">
+                🔒 As fotos são armazenadas de forma privada e os dados de localização do arquivo são removidos antes do envio. Fotos clínicas são dados de saúde: use-as apenas para o prontuário. Divulgação (redes sociais, portfólio) exige autorização de uso de imagem assinada pelo paciente.
+              </p>
+
               <div>
                 <label className="block text-[10px] sm:text-xs font-bold text-gray-600 uppercase tracking-wider mb-1 sm:mb-2">Observações Técnicas</label>
                 <textarea value={form.observacoes} onChange={e => setForm({...form, observacoes: e.target.value})} placeholder="Ex: Paciente apresentou leve edema lateral..." className="w-full border border-gray-300 rounded-lg p-2.5 sm:p-3 text-sm focus:border-[#B68B40] outline-none h-20 sm:h-24" />
@@ -359,6 +397,7 @@ export default function MidiasEvolucao() {
           
           <img 
             src={midiaAmpliada} 
+            referrerPolicy="no-referrer"
             alt="Mídia Ampliada" 
             className="max-w-full max-h-full object-contain rounded-md shadow-2xl" 
             onClick={(e) => e.stopPropagation()} 
