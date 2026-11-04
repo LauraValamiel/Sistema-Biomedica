@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import ModalPoliticaPrivacidade from '../components/ModalPoliticaPrivacidade';
 // @ts-ignore
 import html2pdf from 'html2pdf.js';
 import {
@@ -100,6 +101,9 @@ export default function Pacientes() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isDrawingCliente, setIsDrawingCliente] = useState(false);
   const [isDrawingProf, setIsDrawingProf] = useState(false);
+
+  const [modalPoliticaAberto, setModalPoliticaAberto] = useState(false);
+  const [aceitouPolitica, setAceitouPolitica] = useState(false);
 
   // FUNÇÃO PARA EXIBIR O TOAST (Aviso flutuante)
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -372,6 +376,10 @@ export default function Pacientes() {
     if (!form.nome_completo) return showToast('O Nome do paciente é obrigatório.', 'error'); 
     if (form.cpf && !cpfValido(form.cpf)) return showToast('CPF inválido. Verifique os números digitados.', 'error');
     
+    if (!isEditing && !aceitouPolitica) {
+      return showToast('É necessário confirmar que o paciente está ciente da Política de Privacidade para cadastrá-lo.', 'error');
+    }
+
     const payload = { 
       nome_completo: form.nome_completo.trim(), 
       cpf: form.cpf || null, 
@@ -626,7 +634,7 @@ export default function Pacientes() {
           <p className="text-sm md:text-base text-gray-500 mt-1">Gestão de prontuários 100% digitais</p>
         </div>
         <button 
-          onClick={() => { setForm({}); setIsEditing(false); setAbaAtiva('dados'); setModalAberto(true); }} 
+          onClick={() => { setForm({}); setIsEditing(false); setAbaAtiva('dados'); setAceitouPolitica(false); setModalAberto(true); }} 
           className="bg-[#B68B40] text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-[#9a7330] w-full sm:w-auto shadow-sm shrink-0"
         >
           + Novo Paciente
@@ -774,6 +782,32 @@ export default function Pacientes() {
                       </select>
                     </div>
                   </div>
+
+                  {/* --- INÍCIO: BLOCO DE ACEITE LGPD NO FORMULÁRIO --- */}
+                  {!isEditing && (
+                    <div className="pt-6 border-t border-gray-100 mt-6">
+                      <label className="flex items-start gap-3 cursor-pointer bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <input
+                          type="checkbox"
+                          checked={aceitouPolitica}
+                          onChange={e => setAceitouPolitica(e.target.checked)}
+                          className="mt-0.5 accent-[#B68B40] w-5 h-5 cursor-pointer shrink-0"
+                        />
+                        <span className="text-sm text-gray-700 leading-relaxed">
+                          Confirmo que o paciente foi devidamente informado e concorda com a{' '}
+                          <button 
+                            type="button" 
+                            onClick={() => setModalPoliticaAberto(true)} 
+                            className="text-[#B68B40] hover:underline font-bold"
+                          >
+                            Política de Privacidade (LGPD)
+                          </button>
+                          , autorizando o tratamento e armazenamento dos seus dados clínicos no sistema.
+                        </span>
+                      </label>
+                    </div>
+                  )}
+                  {/* --- FIM: BLOCO DE ACEITE LGPD NO FORMULÁRIO --- */}
 
                   <div className="flex justify-end pt-4"><button onClick={salvarPaciente} className="bg-[#B68B40] text-white px-8 py-3 rounded-lg text-sm font-medium hover:bg-[#9a7330] shadow-sm w-full md:w-auto transition-colors">Guardar Dados</button></div>
                 </div>
@@ -1036,6 +1070,12 @@ export default function Pacientes() {
           </div>
         </div>
       )}
+
+      {/* Coloque logo acima da última tag </div> do componente Pacientes */}
+      <ModalPoliticaPrivacidade 
+        isOpen={modalPoliticaAberto} 
+        onClose={() => setModalPoliticaAberto(false)} 
+      />
     </div>
   );
 }

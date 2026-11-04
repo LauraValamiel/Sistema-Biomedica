@@ -10,6 +10,7 @@ import MidiasEvolucao from './pages/MidiasEvolucao';
 import DocumentosTermos from './pages/DocumentosTermos';
 import Login from './pages/Login';
 import Perfil from './pages/Perfil';
+import PoliticaPrivacidade from './pages/PoliticaPrivacidade';
 
 // Componente auxiliar para gerir o Layout protegido por autenticação
 function AppLayout() {
@@ -114,6 +115,7 @@ function AppLayout() {
             <Route path="/midias-evolucao" element={<MidiasEvolucao />} />
             <Route path="/documentos-termos" element={<DocumentosTermos />} />
             <Route path="/perfil" element={<Perfil />} />
+            <Route path="/politica-privacidade" element={<PoliticaPrivacidade />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>

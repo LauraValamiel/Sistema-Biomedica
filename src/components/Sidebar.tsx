@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
 interface SidebarProps {
@@ -129,6 +129,10 @@ export default function Sidebar({ onCloseMobile }: SidebarProps) {
           </span>
           <span>Meu Perfil</span>
         </NavLink>
+
+        <Link to="/politica-privacidade" className="text-xs text-gray-400 hover:text-[#B68B40] transition-colors">
+          Política de Privacidade (LGPD)
+        </Link>
 
         <button
           onClick={handleLogout}
