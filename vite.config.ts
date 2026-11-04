@@ -11,4 +11,7 @@ export default defineConfig({
     setupFiles: './src/setupTests.ts',
     css: false,
   },
+  build: {
+    chunkSizeWarningLimit: 2000, // Aumenta o limite para parar o aviso amarelo
+  }
 })

@@ -307,9 +307,9 @@ export default function Pacientes() {
        html += `<div class="section-box" style="margin-top: 10px;"><div class="section-title">TERMO DE CONSENTIMENTO</div><div class="termo-content">${e(docs.texto_acordado)}</div></div><div class="avoid-cut"><div class="section-box">`;
        
        if (docs.respostas_extras && Object.keys(docs.respostas_extras).length > 0) {
-           html += `<table class="info-table" style="margin-top:5px; margin-bottom: 15px;">`;
-           for(let key in docs.respostas_extras) { let label = key; modeloOriginal?.campos?.forEach(c => { if(c.id === key) label = c.label; }); html += `<tr><td><span class="label">${e(label)}:</span> <span class="val">${e(docs.respostas_extras[key])}</span></td></tr>`; }
-           html += `</table>`;
+            html += `<table class="info-table" style="margin-top:5px; margin-bottom: 15px;">`;
+            for(let key in docs.respostas_extras) { let label = key; modeloOriginal?.campos?.forEach(c => { if(c.id === key) label = c.label; }); html += `<tr><td><span class="label">${e(label)}:</span> <span class="val">${e(docs.respostas_extras[key])}</span></td></tr>`; }
+            html += `</table>`;
        }
 
        const caixaAutorizacao = (texto: string) => `<div style="margin-top:10px; padding: 12px; border: 1.5px solid #D4B872; border-radius: 6px; text-align: center; background: #fffcf5; font-size: 11px; letter-spacing: 0.5px; color: #B68B40;"><strong>${texto}</strong></div>`;
@@ -606,7 +606,7 @@ export default function Pacientes() {
           {toast.type === 'success' ? (
              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
           ) : (
-             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 0118 0z" /></svg>
+             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           )}
           <span>{toast.msg}</span>
         </div>
@@ -651,15 +651,26 @@ export default function Pacientes() {
 
       <div className="bg-white rounded-xl border border-[#B68B40]/30 shadow-sm flex-1 flex flex-col overflow-hidden w-full">
         
-        {/* BARRA DE PESQUISA (Adicionado Botão LGPD) */}
+        {/* BARRA DE PESQUISA (Botão LGPD com Ícones SVG refinados) */}
         <div className="p-4 border-b border-[#B68B40]/20 bg-[#FDFCFB] shrink-0 flex items-center justify-between gap-4">
           <input type="text" placeholder="Procurar paciente..." value={busca} onChange={(e) => setBusca(e.target.value)} className="w-full md:max-w-md border border-gray-300 rounded-lg p-2.5 text-sm outline-none focus:border-[#B68B40]"/>
           
           <button 
             onClick={() => setMostrarDadosSensiveis(!mostrarDadosSensiveis)} 
-            className="flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-[#B68B40] bg-white border border-gray-200 px-3 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-2 text-xs font-medium text-gray-600 hover:text-[#B68B40] bg-white border border-gray-200 px-3.5 py-2 rounded-lg transition-colors shrink-0 shadow-sm"
+            title={mostrarDadosSensiveis ? "Ocultar nomes (Modo LGPD)" : "Revelar nomes"}
           >
-            {mostrarDadosSensiveis ? '👁️ Ocultar Dados' : '👁️‍🗨️ Modo Privado (LGPD)'}
+            {mostrarDadosSensiveis ? (
+              <>
+                <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                <span>Ocultar</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4 text-[#B68B40]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                <span>Modo Privado</span>
+              </>
+            )}
           </button>
         </div>
         
@@ -840,7 +851,12 @@ export default function Pacientes() {
                       <button onClick={() => setFluxoAnamnese('lista')} className="text-[#B68B40] text-sm hover:underline mb-6 block">← Voltar</button>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                         {modelosFichas.map(modelo => (
-                          <div key={modelo.id} onClick={() => iniciarNovaFicha(modelo)} className="p-5 border border-gray-200 rounded-xl hover:border-[#B68B40] cursor-pointer text-center bg-white transition-colors"><div className="w-12 h-12 bg-[#B68B40]/10 text-[#B68B40] rounded-full flex items-center justify-center mx-auto mb-3 text-xl">📋</div><h4 className="font-medium text-gray-800">{modelo.titulo}</h4></div>
+                          <div key={modelo.id} onClick={() => iniciarNovaFicha(modelo)} className="p-5 border border-gray-200 rounded-xl hover:border-[#B68B40] cursor-pointer text-center bg-white transition-colors">
+                            <div className="w-12 h-12 bg-[#B68B40]/10 text-[#B68B40] rounded-full flex items-center justify-center mx-auto mb-3">
+                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+                            </div>
+                            <h4 className="font-medium text-gray-800">{modelo.titulo}</h4>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -892,7 +908,10 @@ export default function Pacientes() {
                           </div>
 
                           <div className="border border-emerald-500/30 rounded-xl p-4 md:p-6 bg-emerald-50/20 shadow-sm">
-                            <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800 mb-4 flex items-center gap-2">🔒 Assinatura Eletrônica</h3>
+                            <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800 mb-4 flex items-center gap-2">
+                              <svg className="w-4 h-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                              Assinatura Eletrônica
+                            </h3>
                             <div className="space-y-5">
                               <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" checked={termoAceito} onChange={e => setTermoAceito(e.target.checked)} className="mt-1 accent-emerald-600 w-5 h-5 cursor-pointer shrink-0" /><span className="text-sm text-gray-700 leading-relaxed">Declaro que li e concordo integralmente com as informações. Reconheço a validade desta assinatura eletrônica.</span></label>
                               <div><label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Confirme o CPF do Paciente *</label><input type="text" value={cpfAssinatura} onChange={e => setCpfAssinatura(formatarCPF(e.target.value))} maxLength={14} placeholder="000.000.000-00" className="w-full max-w-sm border border-gray-300 rounded-lg p-3 text-sm focus:border-emerald-500 outline-none bg-white shadow-inner" /></div>
@@ -933,7 +952,12 @@ export default function Pacientes() {
                       <button onClick={() => setFluxoDocumento('lista')} className="text-[#B68B40] text-sm hover:underline mb-6">← Voltar</button>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {modelosTermos.map(termo => (
-                          <div key={termo.id} onClick={() => iniciarNovoTermo(termo)} className="p-5 border border-gray-200 rounded-xl hover:border-[#B68B40] cursor-pointer text-center group transition-colors"><div className="text-2xl mb-2">🖋️</div><h4 className="font-medium text-gray-800 group-hover:text-[#B68B40] transition-colors">{termo.titulo}</h4></div>
+                          <div key={termo.id} onClick={() => iniciarNovoTermo(termo)} className="p-5 border border-gray-200 rounded-xl hover:border-[#B68B40] cursor-pointer text-center group transition-colors">
+                            <div className="w-10 h-10 bg-[#B68B40]/10 text-[#B68B40] rounded-full flex items-center justify-center mx-auto mb-3">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                            </div>
+                            <h4 className="font-medium text-gray-800 group-hover:text-[#B68B40] transition-colors">{termo.titulo}</h4>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -985,7 +1009,10 @@ export default function Pacientes() {
                           </div>
 
                           <div className="border border-emerald-500/30 rounded-xl p-4 md:p-6 bg-emerald-50/20 shadow-sm">
-                            <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800 mb-4 flex items-center gap-2">🔒 Assinatura Eletrônica Dupla</h3>
+                            <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800 mb-4 flex items-center gap-2">
+                              <svg className="w-4 h-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                              Assinatura Eletrônica Dupla
+                            </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                               <div className="space-y-4"><label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" checked={termoAceito} onChange={e => setTermoAceito(e.target.checked)} className="mt-1 accent-emerald-600 w-5 h-5 cursor-pointer shrink-0" /><span className="text-sm text-gray-700 leading-relaxed">Eu, Paciente, concordo com os termos.</span></label><div><label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">CPF do Paciente *</label><input type="text" value={cpfAssinatura} onChange={e => setCpfAssinatura(formatarCPF(e.target.value))} maxLength={14} placeholder="000.000.000-00" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-emerald-500 outline-none bg-white shadow-inner" /></div></div>
                               <div className="space-y-4"><label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" checked={profAceito} onChange={e => setProfAceito(e.target.checked)} className="mt-1 accent-emerald-600 w-5 h-5 cursor-pointer shrink-0" /><span className="text-sm text-gray-700 leading-relaxed">Eu, Profissional, atesto a conformidade.</span></label><div><label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Registro/CPF Profissional *</label><input type="text" value={registroProfissional} onChange={e => setRegistroProfissional(e.target.value)} placeholder="CRBM ou CPF" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-emerald-500 outline-none bg-white shadow-inner" /></div></div>

@@ -75,13 +75,16 @@ export default function Perfil() {
         emailConfirmadoAgora = !mudouEmail || authData.user?.email?.toLowerCase() === novoEmail;
       }
 
-      const atualizacaoPerfil: { telefone: string | null; email?: string } = { telefone: telefoneLimpo || null };
+      // Utilizando upsert para garantir que o perfil seja criado caso não exista na tabela perfis_usuario
+      const atualizacaoPerfil: { id: string; telefone: string | null; email?: string } = { 
+        id: user.id, 
+        telefone: telefoneLimpo || null 
+      };
       if (mudouEmail && emailConfirmadoAgora) atualizacaoPerfil.email = novoEmail;
 
       const { error: perfilError } = await supabase
         .from('perfis_usuario')
-        .update(atualizacaoPerfil)
-        .eq('id', user.id);
+        .upsert(atualizacaoPerfil, { onConflict: 'id' });
 
       if (perfilError) throw new Error('Não foi possível atualizar o telefone. Tente novamente.');
 
@@ -233,7 +236,8 @@ export default function Perfil() {
             }}
             className="flex items-center justify-center gap-2 bg-gray-50 text-gray-700 border border-gray-300 px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
           >
-            📥 Exportar Meus Dados
+            <svg className="w-4 h-4 text-[#B68B40]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            Exportar Meus Dados
           </button>
 
           <button 
@@ -249,7 +253,8 @@ export default function Perfil() {
             }}
             className="flex items-center justify-center gap-2 bg-red-50 text-red-600 border border-red-200 px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"
           >
-            🗑️ Solicitar Exclusão da Conta
+            <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+            Solicitar Exclusão da Conta
           </button>
         </div>
       </div>

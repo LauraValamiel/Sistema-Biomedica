@@ -130,9 +130,7 @@ export default function Sidebar({ onCloseMobile }: SidebarProps) {
           <span>Meu Perfil</span>
         </NavLink>
 
-        <Link to="/politica-privacidade" className="text-xs text-gray-400 hover:text-[#B68B40] transition-colors">
-          Política de Privacidade (LGPD)
-        </Link>
+        
 
         <button
           onClick={handleLogout}
@@ -145,6 +143,11 @@ export default function Sidebar({ onCloseMobile }: SidebarProps) {
           </span>
           <span>Sair da Conta</span>
         </button>
+
+        <Link to="/politica-privacidade" className="text-xs text-gray-400 hover:text-[#B68B40] transition-colors">
+          Política de Privacidade (LGPD)
+        </Link>
+
       </div>
 
     </div>
