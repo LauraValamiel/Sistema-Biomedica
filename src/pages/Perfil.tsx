@@ -61,8 +61,6 @@ export default function Perfil() {
       let emailConfirmadoAgora = !mudouEmail;
 
       if (mudouEmail || mudouSenha) {
-        // Confirma a senha atual antes de trocar e-mail ou senha: impede que alguém
-        // com acesso a uma sessão aberta (ex.: tablet da clínica) tome a conta
         if (!senhaAtual) throw new Error('Informe a sua senha atual para alterar e-mail ou senha.');
         const { error: reauthError } = await supabase.auth.signInWithPassword({ email: user.email, password: senhaAtual });
         if (reauthError) throw new Error('Senha atual incorreta.');
@@ -74,11 +72,9 @@ export default function Perfil() {
         const { data: authData, error: authError } = await supabase.auth.updateUser(atualizacoesAuth);
         if (authError) throw new Error('Não foi possível atualizar as credenciais. Tente novamente.');
 
-        // Se o Supabase exigir confirmação por e-mail, a troca só vale depois de confirmada
         emailConfirmadoAgora = !mudouEmail || authData.user?.email?.toLowerCase() === novoEmail;
       }
 
-      // 2. Atualiza o perfil (só UPDATE da própria linha; criar perfis pelo app não é permitido)
       const atualizacaoPerfil: { telefone: string | null; email?: string } = { telefone: telefoneLimpo || null };
       if (mudouEmail && emailConfirmadoAgora) atualizacaoPerfil.email = novoEmail;
 
@@ -210,6 +206,54 @@ export default function Perfil() {
           </div>
         </form>
       </div>
+
+      <div className="mt-8 bg-white rounded-xl border border-gray-200 shadow-sm p-6 md:p-8 mb-10">
+        <h2 className="text-xl font-medium text-gray-800 mb-2">Privacidade e Direitos (LGPD)</h2>
+        <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+          Conforme estabelecido pela Lei Geral de Proteção de Dados, você tem o direito de acessar os seus dados registrados neste sistema ou solicitar a sua eliminação (respeitando os prazos legais de guarda de prontuários médicos).
+        </p>
+
+        <div className="flex flex-col sm:flex-row gap-4">
+          <button 
+            onClick={async () => {
+              const { data: { user } } = await supabase.auth.getUser();
+              const dadosExportacao = {
+                id_conta: user?.id,
+                email: user?.email,
+                telefone: telefone,
+                data_solicitacao: new Date().toISOString()
+              };
+              const blob = new Blob([JSON.stringify(dadosExportacao, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'meus_dados_lgpd.json';
+              a.click();
+              setMensagem({ texto: 'Download dos seus dados iniciado.', tipo: 'sucesso' });
+            }}
+            className="flex items-center justify-center gap-2 bg-gray-50 text-gray-700 border border-gray-300 px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
+          >
+            📥 Exportar Meus Dados
+          </button>
+
+          <button 
+            onClick={async () => {
+              if (window.confirm('Tem a certeza que deseja solicitar a exclusão da sua conta? Isso inativará seu acesso. A exclusão definitiva pode aguardar o tempo legal de retenção de prontuários.')) {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                  await supabase.from('perfis_usuario').update({ deleted_at: new Date().toISOString() }).eq('id', user.id);
+                  await supabase.auth.signOut();
+                  window.location.reload();
+                }
+              }
+            }}
+            className="flex items-center justify-center gap-2 bg-red-50 text-red-600 border border-red-200 px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"
+          >
+            🗑️ Solicitar Exclusão da Conta
+          </button>
+        </div>
+      </div>
+
     </div>
   );
 }

@@ -6,6 +6,23 @@ type Campo = { id: string; label: string; tipo: string; opcoes?: string[] };
 type Secao = { titulo: string; campos: Campo[] };
 type ModeloFicha = { id: string; titulo: string; campos: Secao[]; created_at: string };
 
+// --- SEÇÃO LGPD PADRÃO OBRIGATÓRIA (REUSÁVEL) ---
+const SECAO_LGPD: Secao = {
+  titulo: 'Termo de Consentimento e Privacidade (LGPD)',
+  campos: [
+    { 
+      id: 'lgpd_consentimento_saude', 
+      label: 'Autorizo expressamente o tratamento dos meus dados de saúde e biometria (fotos) fornecidos nesta ficha, exclusivamente para a finalidade de avaliação clínica, planejamento e execução do protocolo estético, conforme a Lei 13.709/18.', 
+      tipo: 'checkbox' 
+    },
+    { 
+      id: 'lgpd_consentimento_contato', 
+      label: 'Autorizo o envio de mensagens de acompanhamento clínico e lembretes de agendamento via WhatsApp ou E-mail.', 
+      tipo: 'checkbox' 
+    }
+  ]
+};
+
 // --- MODELOS PADRÃO (SÃO CARREGADOS AUTOMATICAMENTE SE O BANCO ESTIVER VAZIO) ---
 const MODELOS_PADRAO: Record<string, Secao[]> = {
   'Anamnese Facial': [
@@ -30,7 +47,8 @@ const MODELOS_PADRAO: Record<string, Secao[]> = {
       { id: 'facial_pele', label: 'Tipo de Pele', tipo: 'select', opcoes: ['Normal', 'Seca', 'Oleosa', 'Mista', 'Sensível'] },
       { id: 'facial_foto', label: 'Fototipo', tipo: 'text' },
       { id: 'facial_obs', label: 'Avaliação Clínica (Acne, Manchas, Flacidez, etc.)', tipo: 'textarea' }
-    ]}
+    ]},
+    SECAO_LGPD
   ],
   'Anamnese Corporal': [
     { titulo: 'Queixa Principal', campos: [
@@ -47,7 +65,8 @@ const MODELOS_PADRAO: Record<string, Secao[]> = {
     { titulo: 'Histórico de Saúde', campos: [
       { id: 'corp_saude', label: 'Hipertensão / Diabetes / Problemas circulatórios?', tipo: 'textarea' },
       { id: 'corp_cirur', label: 'Já realizou cirurgias? Quais?', tipo: 'text' }
-    ]}
+    ]},
+    SECAO_LGPD
   ],
   'Anamnese - Microvasos': [
     { titulo: 'Histórico de Saúde Vascular', campos: [
@@ -60,7 +79,8 @@ const MODELOS_PADRAO: Record<string, Secao[]> = {
       { id: 'vasos_pres', label: 'Presença de telangiectasias (vasinhos superficiais)?', tipo: 'select', opcoes: ['Não', 'Sim'] },
       { id: 'vasos_edema', label: 'Apresenta edema ou manchas?', tipo: 'select', opcoes: ['Não', 'Sim'] },
       { id: 'vasos_obs', label: 'Observações profissionais', tipo: 'textarea' }
-    ]}
+    ]},
+    SECAO_LGPD
   ]
 };
 
@@ -68,16 +88,13 @@ export default function FichasAnamnese() {
   const [modelos, setModelos] = useState<ModeloFicha[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Controle de Modo (Lista vs Edição/Criação vs Visualização)
   const [modo, setModo] = useState<'lista' | 'criando' | 'visualizando'>('lista');
   const [modeloVisualizar, setModeloVisualizar] = useState<ModeloFicha | null>(null);
 
-  // Estados do Formulário de Edição/Criação
   const [formId, setFormId] = useState<string | null>(null);
   const [formTitulo, setFormTitulo] = useState('');
   const [formSecoes, setFormSecoes] = useState<Secao[]>([]);
 
-  // ESTADOS PARA OS AVISOS BONITOS (Toasts e Confirmações)
   const [toast, setToast] = useState<{ show: boolean, msg: string, type: 'success' | 'error' }>({ show: false, msg: '', type: 'success' });
   const [confirmDialog, setConfirmDialog] = useState<{ show: boolean, msg: string, action: (() => void) | null }>({ show: false, msg: '', action: null });
 
@@ -85,7 +102,6 @@ export default function FichasAnamnese() {
     buscarModelos();
   }, []);
 
-  // FUNÇÃO PARA EXIBIR O TOAST
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ show: true, msg, type });
     setTimeout(() => setToast(t => ({ ...t, show: false })), 3500);
@@ -180,7 +196,6 @@ export default function FichasAnamnese() {
     setModo('criando');
   };
 
-  // --- FUNÇÕES DO CONSTRUTOR ---
   const adicionarSecao = () => setFormSecoes([...formSecoes, { titulo: '', campos: [] }]);
   const atualizarTituloSecao = (index: number, valor: string) => {
     const novasSecoes = [...formSecoes];
@@ -228,7 +243,8 @@ export default function FichasAnamnese() {
           { id: `s_2_${Date.now()}`, label: 'Possui alergia a alguma substância?', tipo: 'text' },
           { id: `s_3_${Date.now()}`, label: 'Faz uso contínuo de algum medicamento?', tipo: 'text' }
         ]
-      }
+      },
+      SECAO_LGPD
     ]);
     setModo('criando');
   };
@@ -236,7 +252,6 @@ export default function FichasAnamnese() {
   return (
     <div className="w-full h-full flex flex-col mx-auto overflow-x-hidden box-border sm:p-8 max-w-7xl relative">
       
-      {/* TOAST CUSTOMIZADO (Aviso Flutuante Moderno) */}
       {toast.show && (
         <div className={`fixed top-6 right-6 z-[99999] flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl text-sm font-medium text-white border transition-all duration-300 transform translate-y-0 opacity-100 ${toast.type === 'success' ? 'bg-emerald-500 border-emerald-600' : 'bg-red-500 border-red-600'}`}>
           {toast.type === 'success' ? (
@@ -248,7 +263,6 @@ export default function FichasAnamnese() {
         </div>
       )}
 
-      {/* MODAL DE CONFIRMAÇÃO CUSTOMIZADO */}
       {confirmDialog.show && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[99999] p-4">
           <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 max-w-sm w-full text-center transform transition-all">
@@ -284,7 +298,6 @@ export default function FichasAnamnese() {
 
       <div className="bg-white sm:rounded-xl border-y sm:border border-[#B68B40]/30 shadow-sm flex-1 flex flex-col overflow-hidden w-full">
         
-        {/* --- TELA DA LISTA DE FICHAS --- */}
         {modo === 'lista' && (
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gray-50/30">
             {loading ? (
@@ -298,7 +311,6 @@ export default function FichasAnamnese() {
                     className="p-5 sm:p-6 border border-gray-200 rounded-xl hover:border-[#B68B40] transition-all bg-white flex flex-col h-full shadow-sm hover:shadow-md cursor-pointer"
                   >
                     <div className="flex-1">
-                      {/* Ícone de prancheta profissional substituindo o emoji */}
                       <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#B68B40]/10 text-[#B68B40] rounded-full flex items-center justify-center mb-4">
                         <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                       </div>
@@ -326,7 +338,6 @@ export default function FichasAnamnese() {
           </div>
         )}
 
-        {/* --- TELA DE VISUALIZAÇÃO --- */}
         {modo === 'visualizando' && modeloVisualizar && (
           <div className="flex-1 flex flex-col h-full bg-gray-50/50 overflow-x-hidden">
             <div className="p-4 sm:p-6 border-b border-gray-200 bg-white flex justify-between items-center shrink-0">
@@ -359,7 +370,6 @@ export default function FichasAnamnese() {
           </div>
         )}
 
-        {/* --- TELA DE CRIAÇÃO OU EDIÇÃO --- */}
         {modo === 'criando' && (
           <div className="flex-1 flex flex-col h-full bg-gray-50/50 overflow-x-hidden">
             <div className="p-4 sm:p-6 border-b border-gray-200 bg-white shrink-0">
@@ -417,7 +427,6 @@ export default function FichasAnamnese() {
                             )}
                           </div>
                         </div>
-                        {/* Ícone de lixeira profissional no botão de remover pergunta */}
                         <button onClick={() => removerCampo(sIdx, cIdx)} className="absolute top-4 right-4 sm:static text-gray-400 hover:text-red-500 sm:mt-6 transition-colors" title="Remover Pergunta">
                           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>

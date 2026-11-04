@@ -165,3 +165,38 @@ export async function sha256Hex(texto: string): Promise<string> {
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
 }
+
+/** MÁSCARAS LGPD (Minimização de Dados - Art. 6º, III) */
+export const mascararNome = (nome: string): string => {
+  if (!nome) return '';
+  const partes = nome.trim().split(' ');
+  if (partes.length === 1) return nome;
+  return `${partes[0]} ${partes[partes.length - 1].charAt(0)}***`;
+};
+
+export const mascararTelefone = (telefone: string): string => {
+  if (!telefone) return '---';
+  return telefone.replace(/(\(\d{2}\))\s\d{1,4}-\d{2}(\d{2})/, '$1 9****-**$2');
+};
+
+export const mascararCpf = (cpf: string): string => {
+  if (!cpf) return '---';
+  return cpf.replace(/\d{3}\.\d{3}\.\d{3}/, '***.***.***');
+};
+
+/** LOG DE AUDITORIA LGPD (Rastreabilidade) */
+export const registrarLogAuditoria = async (pacienteId: string, acao: string) => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    
+    await supabase.from('logs_auditoria_lgpd').insert([{
+      paciente_id: pacienteId,
+      usuario_id: user.id,
+      acao: acao,
+      data_hora: new Date().toISOString()
+    }]);
+  } catch (err) {
+    console.error('Erro ao registrar auditoria LGPD', err);
+  }
+};

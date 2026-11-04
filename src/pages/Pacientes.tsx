@@ -15,6 +15,9 @@ import {
   prepararImagemSegura,
   sanitizarNomeArquivo,
   sha256Hex,
+  mascararNome,
+  mascararTelefone,
+  registrarLogAuditoria
 } from '../lib/lgpd';
 
 type Paciente = { 
@@ -44,6 +47,8 @@ export default function Pacientes() {
   const [pacientes, setPacientes] = useState<Paciente[]>([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
+  
+  const [mostrarDadosSensiveis, setMostrarDadosSensiveis] = useState(false);
 
   // ESTADOS PARA OS AVISOS BONITOS (Substitui os alerts e confirms)
   const [toast, setToast] = useState<{ show: boolean, msg: string, type: 'success' | 'error' }>({ show: false, msg: '', type: 'success' });
@@ -121,8 +126,6 @@ export default function Pacientes() {
     return "Declaro que as informações acima são verdadeiras e que não omiti qualquer informação importante sobre minha saúde.";
   };
 
-  // Rodapé de autenticação do PDF. Mostra o IP e a hora registrados pelo SERVIDOR (trigger no banco)
-  // quando existirem; documentos antigos continuam exibindo os dados que tinham.
   const blocoAutenticacao = (auth: any, dupla: boolean) => {
     const e = escapeHtml;
     const servidor = auth?.registro_servidor;
@@ -140,7 +143,7 @@ export default function Pacientes() {
     setGerandoPdf(true);
     const tituloDoc = tipo === 'ficha' ? item.historico_medico?.tipo_ficha : item.tipo_documento;
     const nomeArquivo = `${sanitizarNomeArquivo(`${form.nome_completo || 'paciente'} - ${tituloDoc || 'documento'}`)}.pdf`;
-    const e = escapeHtml; // todo dado digitado é escapado antes de entrar no HTML do PDF
+    const e = escapeHtml;
 
     const enderecoCompleto = [
       form.rua ? `${form.rua}` : '',
@@ -307,11 +310,9 @@ export default function Pacientes() {
 
        const caixaAutorizacao = (texto: string) => `<div style="margin-top:10px; padding: 12px; border: 1.5px solid #D4B872; border-radius: 6px; text-align: center; background: #fffcf5; font-size: 11px; letter-spacing: 0.5px; color: #B68B40;"><strong>${texto}</strong></div>`;
        if (docs.autorizacao_imagem) {
-         // Termos novos: consentimentos separados
          html += caixaAutorizacao(`${docs.autorizacao === 'Sim' ? '✓ AUTORIZO' : '✗ NÃO AUTORIZO'} A REALIZAÇÃO DO PROCEDIMENTO`);
          html += caixaAutorizacao(`${docs.autorizacao_imagem === 'Sim' ? '✓ AUTORIZO' : '✗ NÃO AUTORIZO'} O USO DE MINHA IMAGEM PARA DIVULGAÇÃO (revogável a qualquer momento)`);
        } else {
-         // Termos antigos, assinados antes da separação dos consentimentos
          html += caixaAutorizacao(`${docs.autorizacao === 'Sim' ? '✓ AUTORIZO' : '✗ NÃO AUTORIZO'} A REALIZAÇÃO DO PROCEDIMENTO E/OU USO DE MINHA IMAGEM`);
        }
        const sigCliente = imagemAssinaturaSegura(docs.assinatura_cliente_desenho);
@@ -343,8 +344,6 @@ export default function Pacientes() {
 
   useEffect(() => { buscarPacientes(); buscarModelosDisponiveis(); }, []);
 
-  // Minimização (LGPD art. 6º, III): a lista só carrega o que exibe. O cadastro completo
-  // é buscado apenas quando o prontuário de um paciente é aberto.
   const buscarPacientes = async () => {
     setLoading(true);
     const { data, error } = await supabase.from('pacientes').select('id, nome_completo, telefone');
@@ -412,7 +411,6 @@ export default function Pacientes() {
       action: async () => {
         setConfirmDialog({ show: false, msg: '', action: null });
 
-        // 1º remove as fotos do storage (senão ficariam arquivos órfãos com dados de saúde)
         const { data: midiasPaciente, error: erroLista } = await supabase.from('paciente_midias').select('id, url_arquivo').eq('paciente_id', id);
         if (erroLista) { showToast('Não foi possível verificar as fotos do paciente. Nada foi apagado.', 'error'); return; }
         const caminhos = (midiasPaciente || []).map(m => extrairCaminhoStorage(m.url_arquivo)).filter(Boolean);
@@ -429,10 +427,6 @@ export default function Pacientes() {
     });
   };
 
-  // Gera os dados de autenticação. O hash agora cobre o CONTEÚDO assinado (respostas, texto do termo,
-  // consentimentos e assinaturas desenhadas), então qualquer alteração posterior é detectável.
-  // O IP e a hora oficial NÃO são mais obtidos via serviço externo: um trigger no banco registra
-  // esses dados do lado do servidor (ver SQL), sem enviar o IP do paciente a terceiros.
   const gerarAssinaturaEletronica = async (conteudo: unknown, dupla = false) => {
     if (!termoAceito) { showToast("É necessário aceitar os termos de compromisso.", "error"); return null; }
     if (!cpfValido(cpfAssinatura)) { showToast("O CPF do paciente é inválido ou está incompleto.", "error"); return null; }
@@ -478,8 +472,6 @@ export default function Pacientes() {
     });
   };
 
-  // Documentos assinados são IMUTÁVEIS: "editar" gera uma NOVA versão assinada que referencia a anterior.
-  // A versão anterior é preservada, garantindo a integridade do que o paciente efetivamente assinou.
   const salvarFichaAnamnese = async () => {
     if (!form.id) return showToast('Guarde os dados do paciente antes de preencher a ficha.', 'error');
     const imgDesenho = getImgCanvas();
@@ -536,7 +528,6 @@ export default function Pacientes() {
     setUploadingMidia(true); 
     let caminhoEnviado: string | null = null;
     try { 
-      // Remove metadados (GPS, aparelho, data) e padroniza em JPEG antes do envio
       const imagemLimpa = await prepararImagemSegura(arquivoMidia);
       const caminho = gerarCaminhoMidia(form.id);
       const { error: uploadError } = await supabase.storage.from(BUCKET_MIDIAS).upload(caminho, imagemLimpa, { contentType: 'image/jpeg', cacheControl: '3600', upsert: false }); 
@@ -555,7 +546,6 @@ export default function Pacientes() {
       setArquivoMidia(null); 
       setFormMidia({ ...formMidia, procedimento: '', observacoes: '' }); 
     } catch (error: any) { 
-      // Se o arquivo subiu mas o registro falhou, remove o arquivo para não deixar foto órfã
       if (caminhoEnviado) await supabase.storage.from(BUCKET_MIDIAS).remove([caminhoEnviado]);
       showToast(error?.message || 'Ocorreu um erro ao salvar a foto.', 'error'); 
     } finally { 
@@ -568,7 +558,6 @@ export default function Pacientes() {
       show: true, msg: 'Tem a certeza que deseja eliminar esta foto de evolução?',
       action: async () => {
         setConfirmDialog({ show: false, msg: '', action: null });
-        // 1º apaga o arquivo; só depois o registro
         const caminho = extrairCaminhoStorage(url_arquivo);
         if (caminho) {
           const { error: erroStorage } = await supabase.storage.from(BUCKET_MIDIAS).remove([caminho]);
@@ -583,7 +572,6 @@ export default function Pacientes() {
   };
 
   const ampliarMidia = async (url_arquivo: string) => {
-    // Link novo e de curta duração, aberto sem repassar a origem (noopener/noreferrer)
     const url = await gerarUrlAssinada(extrairCaminhoStorage(url_arquivo));
     if (!url) return showToast('Não foi possível abrir a foto.', 'error');
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -591,29 +579,31 @@ export default function Pacientes() {
 
   const abrirPerfilPaciente = async (paciente: Paciente) => {
     setForm(paciente); setIsEditing(true); setAbaAtiva('dados'); setFluxoAnamnese('lista'); setFluxoDocumento('lista'); setFluxoMidia('lista'); setHistoricoAnamneses([]); setHistoricoDocumentos([]); setHistoricoMidias([]); setUrlsMidias({}); setModalAberto(true);
-    // Carrega o cadastro completo apenas ao abrir o prontuário
+    
+    // REGISTRO DE AUDITORIA (LGPD)
+    await registrarLogAuditoria(paciente.id, 'Visualização de Prontuário Clínico');
+
     const { data } = await supabase.from('pacientes').select('*').eq('id', paciente.id).single();
     if (data) setForm(data);
     buscarHistoricoPaciente(paciente.id); buscarModelosDisponiveis();
   };
+
   const pacientesProcessados = pacientes.filter(p => p.nome_completo.toLowerCase().includes(busca.toLowerCase())).sort((a, b) => a.nome_completo.localeCompare(b.nome_completo));
 
   return (
     <div className="w-full h-full p-4 md:p-8 mx-auto flex flex-col overflow-x-hidden box-border max-w-7xl relative">
       
-      {/* TOAST CUSTOMIZADO (Aviso Flutuante) */}
       {toast.show && (
         <div className={`fixed top-6 right-6 z-[99999] flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl text-sm font-medium text-white border transition-all duration-300 transform translate-y-0 opacity-100 ${toast.type === 'success' ? 'bg-emerald-500 border-emerald-600' : 'bg-red-500 border-red-600'}`}>
           {toast.type === 'success' ? (
              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
           ) : (
-             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 0118 0z" /></svg>
           )}
           <span>{toast.msg}</span>
         </div>
       )}
 
-      {/* MODAL DE CONFIRMAÇÃO CUSTOMIZADO (Substitui window.confirm) */}
       {confirmDialog.show && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[99999] p-4">
           <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 max-w-sm w-full text-center transform transition-all">
@@ -630,7 +620,6 @@ export default function Pacientes() {
         </div>
       )}
 
-      {/* CABEÇALHO DA PÁGINA */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 w-full shrink-0">
         <div>
           <h1 className="text-2xl md:text-3xl font-light text-gray-800">Pacientes</h1>
@@ -652,15 +641,20 @@ export default function Pacientes() {
         </div>
       )}
 
-      {/* CAIXA BRANCA PRINCIPAL */}
       <div className="bg-white rounded-xl border border-[#B68B40]/30 shadow-sm flex-1 flex flex-col overflow-hidden w-full">
         
-        {/* BARRA DE PESQUISA */}
-        <div className="p-4 border-b border-[#B68B40]/20 bg-[#FDFCFB] shrink-0">
+        {/* BARRA DE PESQUISA (Adicionado Botão LGPD) */}
+        <div className="p-4 border-b border-[#B68B40]/20 bg-[#FDFCFB] shrink-0 flex items-center justify-between gap-4">
           <input type="text" placeholder="Procurar paciente..." value={busca} onChange={(e) => setBusca(e.target.value)} className="w-full md:max-w-md border border-gray-300 rounded-lg p-2.5 text-sm outline-none focus:border-[#B68B40]"/>
+          
+          <button 
+            onClick={() => setMostrarDadosSensiveis(!mostrarDadosSensiveis)} 
+            className="flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-[#B68B40] bg-white border border-gray-200 px-3 py-2 rounded-lg transition-colors"
+          >
+            {mostrarDadosSensiveis ? '👁️ Ocultar Dados' : '👁️‍🗨️ Modo Privado (LGPD)'}
+          </button>
         </div>
         
-        {/* ÁREA DA LISTA */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden w-full">
           
           {/* LAYOUT PARA TELEMÓVEL */}
@@ -668,8 +662,12 @@ export default function Pacientes() {
             {pacientesProcessados.map(paciente => (
               <div key={paciente.id} className="p-4 flex items-center justify-between hover:bg-[#B68B40]/5 cursor-pointer transition-colors" onClick={() => abrirPerfilPaciente(paciente)}>
                 <div className="flex-1 min-w-0 pr-3 overflow-hidden">
-                  <p className="text-sm font-medium text-gray-800 truncate" title={paciente.nome_completo}>{paciente.nome_completo}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">{paciente.telefone || 'Sem telefone'}</p>
+                  <p className="text-sm font-medium text-gray-800 truncate" title={paciente.nome_completo}>
+                    {mostrarDadosSensiveis ? paciente.nome_completo : mascararNome(paciente.nome_completo)}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                    {mostrarDadosSensiveis ? (paciente.telefone || 'Sem telefone') : mascararTelefone(paciente.telefone)}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button onClick={(e) => deletarPaciente(paciente.id, e)} className="text-red-400 p-2 hover:bg-red-50 rounded-full transition-colors" title="Eliminar Paciente">
@@ -693,8 +691,12 @@ export default function Pacientes() {
             <tbody className="divide-y divide-gray-100">
               {pacientesProcessados.map(paciente => (
                 <tr key={paciente.id} className="hover:bg-[#B68B40]/5 cursor-pointer transition-colors" onClick={() => abrirPerfilPaciente(paciente)}>
-                  <td className="p-4 font-medium text-gray-800 truncate">{paciente.nome_completo}</td>
-                  <td className="p-4 text-sm text-gray-600 truncate">{paciente.telefone || '---'}</td>
+                  <td className="p-4 font-medium text-gray-800 truncate">
+                    {mostrarDadosSensiveis ? paciente.nome_completo : mascararNome(paciente.nome_completo)}
+                  </td>
+                  <td className="p-4 text-sm text-gray-600 truncate">
+                    {mostrarDadosSensiveis ? (paciente.telefone || '---') : mascararTelefone(paciente.telefone)}
+                  </td>
                   <td className="p-4">
                     <div className="flex items-center justify-end gap-3">
                       <button onClick={(e) => deletarPaciente(paciente.id, e)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors shrink-0" title="Eliminar Paciente">
@@ -711,7 +713,6 @@ export default function Pacientes() {
         </div>
       </div>
 
-      {/* MODAL DE PERFIL/NOVO PACIENTE */}
       {modalAberto && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden mx-auto">
@@ -745,7 +746,6 @@ export default function Pacientes() {
                     <div><label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">E-mail</label><input type="email" value={form.email || ''} onChange={e => setForm({...form, email: e.target.value})} className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-[#B68B40] outline-none" /></div>
                   </div>
 
-                  {/* CAMPOS DE ENDEREÇO SEPARADOS */}
                   <div className="space-y-4 pt-2 border-t border-gray-100">
                     <h3 className="text-xs font-bold text-[#B68B40] uppercase tracking-wider">Endereço</h3>
                     
@@ -930,7 +930,6 @@ export default function Pacientes() {
                           </div>
                         </div>
 
-                        {/* CONSENTIMENTO DE IMAGEM SEPARADO (LGPD art. 8º §4º e art. 11, I) */}
                         <div className="border border-gray-200 rounded-lg p-4 md:p-5 mb-8">
                           <p className="text-gray-800 font-medium mb-2 text-sm md:text-base">Uso de imagem para divulgação</p>
                           <p className="text-gray-600 mb-4 text-xs md:text-sm leading-relaxed">As fotos de antes, durante e depois são registradas no prontuário para acompanhamento clínico. Separadamente, autorizo ou não o uso das minhas imagens em redes sociais, portfólio e materiais de divulgação da profissional. Esta escolha não interfere na realização do procedimento e posso revogá-la a qualquer momento, mediante solicitação.</p>
@@ -998,11 +997,9 @@ export default function Pacientes() {
                         
                         <div><label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Procedimento *</label><input type="text" value={formMidia.procedimento} onChange={e => setFormMidia({...formMidia, procedimento: e.target.value})} placeholder="Ex: Lipo Enzimática de Papada" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-[#B68B40] outline-none" /></div>
                         
-                        {/* OPÇÕES DUPLAS PARA A CÂMARA OU GALERIA */}
                         <div>
                           <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">Imagem da Evolução *</label>
                           
-                          {/* Inputs invisíveis originais */}
                           <input type="file" accept="image/*" capture="environment" id="cameraInput" onChange={handleFileChange} className="hidden" />
                           <input type="file" accept="image/*" id="galleryInput" onChange={handleFileChange} className="hidden" />
                           
@@ -1018,7 +1015,6 @@ export default function Pacientes() {
                             </label>
                           </div>
 
-                          {/* Mensagem de sucesso quando a foto for selecionada */}
                           {arquivoMidia && (
                             <div className="mt-3 flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg">
                               <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
