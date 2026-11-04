@@ -3,7 +3,6 @@ import { supabase } from '../lib/supabase';
 
 const SENHA_MINIMA = 8;
 
-// Guarda o telefone só com números (é assim que o login por telefone compara) e exibe formatado
 const somenteNumeros = (v: string) => v.replace(/\D/g, '').slice(0, 11);
 const formatarTelefone = (v: string) =>
   somenteNumeros(v)
@@ -14,11 +13,11 @@ export default function Perfil() {
   const [emailAtual, setEmailAtual] = useState('');
   const [email, setEmail] = useState('');
   const [telefone, setTelefone] = useState('');
+  const [telefoneAtual, setTelefoneAtual] = useState('');
   const [senhaAtual, setSenhaAtual] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
   
-  // ESTADOS PARA MOSTRAR/OCULTAR SENHAS
   const [mostrarSenhaAtual, setMostrarSenhaAtual] = useState(false);
   const [mostrarNovaSenha, setMostrarNovaSenha] = useState(false);
   const [mostrarConfirmarSenha, setMostrarConfirmarSenha] = useState(false);
@@ -35,13 +34,19 @@ export default function Perfil() {
     if (user) {
       setEmail(user.email || '');
       setEmailAtual(user.email || '');
-      // A policy "Ler o próprio perfil" só permite ler a linha do próprio usuário
       const { data } = await supabase.from('perfis_usuario').select('telefone').eq('id', user.id).single();
-      if (data) setTelefone(formatarTelefone(data.telefone || ''));
+      if (data) {
+        const telFormatado = formatarTelefone(data.telefone || '');
+        setTelefone(telFormatado);
+        setTelefoneAtual(telFormatado);
+      }
     }
   };
 
-  const vaiAlterarCredenciais = email.trim().toLowerCase() !== emailAtual.toLowerCase() || novaSenha.length > 0;
+  const mudouEmail = email.trim().toLowerCase() !== emailAtual.toLowerCase();
+  const mudouSenha = novaSenha.length > 0;
+  const mudouTelefone = somenteNumeros(telefone) !== somenteNumeros(telefoneAtual);
+  const vaiAlterarCredenciais = mudouEmail || mudouSenha;
 
   const atualizarDados = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,8 +59,6 @@ export default function Perfil() {
 
       const novoEmail = email.trim().toLowerCase();
       const telefoneLimpo = somenteNumeros(telefone);
-      const mudouEmail = novoEmail !== user.email.toLowerCase();
-      const mudouSenha = novaSenha.length > 0;
 
       if (telefoneLimpo && telefoneLimpo.length < 10) throw new Error('Telefone incompleto. Informe DDD e número.');
 
@@ -66,8 +69,10 @@ export default function Perfil() {
 
       let emailConfirmadoAgora = !mudouEmail;
 
-      if (mudouEmail || mudouSenha) {
+      // SÓ executa o signInWithPassword e updateUser se realmente houver alteração de e-mail ou senha
+      if (vaiAlterarCredenciais) {
         if (!senhaAtual) throw new Error('Informe a sua senha atual para alterar e-mail ou senha.');
+        
         const { error: reauthError } = await supabase.auth.signInWithPassword({ email: user.email, password: senhaAtual });
         if (reauthError) throw new Error('Senha atual incorreta.');
 
@@ -76,23 +81,25 @@ export default function Perfil() {
         if (mudouSenha) atualizacoesAuth.password = novaSenha;
 
         const { data: authData, error: authError } = await supabase.auth.updateUser(atualizacoesAuth);
-        if (authError) throw new Error('Não foi possível atualizar as credenciais. Tente novamente.');
+        if (authError) throw new Error('Não foi possível atualizar as credenciais no servidor. Tente novamente em alguns instantes.');
 
         emailConfirmadoAgora = !mudouEmail || authData.user?.email?.toLowerCase() === novoEmail;
       }
 
-      // Utilizando upsert para garantir que o perfil seja criado caso não exista na tabela perfis_usuario
-      const atualizacaoPerfil: { id: string; telefone: string | null; email?: string } = { 
-        id: user.id, 
-        telefone: telefoneLimpo || null 
-      };
-      if (mudouEmail && emailConfirmadoAgora) atualizacaoPerfil.email = novoEmail;
+      // Atualiza o perfil na tabela perfis_usuario se houver mudança de telefone ou e-mail confirmado
+      if (mudouTelefone || (mudouEmail && emailConfirmadoAgora)) {
+        const atualizacaoPerfil: { id: string; telefone: string | null; email?: string } = { 
+          id: user.id, 
+          telefone: telefoneLimpo || null 
+        };
+        if (mudouEmail && emailConfirmadoAgora) atualizacaoPerfil.email = novoEmail;
 
-      const { error: perfilError } = await supabase
-        .from('perfis_usuario')
-        .upsert(atualizacaoPerfil, { onConflict: 'id' });
+        const { error: perfilError } = await supabase
+          .from('perfis_usuario')
+          .upsert(atualizacaoPerfil, { onConflict: 'id' });
 
-      if (perfilError) throw new Error('Não foi possível atualizar o telefone. Tente novamente.');
+        if (perfilError) throw new Error('Não foi possível atualizar os dados complementares. Tente novamente.');
+      }
 
       if (mudouEmail && !emailConfirmadoAgora) {
         setMensagem({ texto: 'Dados guardados. Enviámos um link de confirmação para o novo e-mail: a troca só passa a valer depois de confirmada.', tipo: 'sucesso' });
@@ -100,6 +107,7 @@ export default function Perfil() {
       } else {
         setMensagem({ texto: 'Dados atualizados com sucesso!', tipo: 'sucesso' });
         setEmailAtual(novoEmail);
+        setTelefoneAtual(telefone);
       }
       setSenhaAtual('');
       setNovaSenha('');
