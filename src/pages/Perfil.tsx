@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
-const SENHA_MINIMA = 8;
+const SENHA_MINIMA = 6; // O padrão mínimo do Supabase costuma ser 6 caracteres
 
 const somenteNumeros = (v: string) => v.replace(/\D/g, '').slice(0, 11);
 const formatarTelefone = (v: string) =>
@@ -73,17 +73,29 @@ export default function Perfil() {
       if (vaiAlterarCredenciais) {
         if (!senhaAtual) throw new Error('Informe a sua senha atual para alterar e-mail ou senha.');
         
+        // Reautentica para confirmar identidade
         const { error: reauthError } = await supabase.auth.signInWithPassword({ email: user.email, password: senhaAtual });
         if (reauthError) throw new Error('Senha atual incorreta.');
 
-        const atualizacoesAuth: { email?: string; password?: string } = {};
-        if (mudouEmail) atualizacoesAuth.email = novoEmail;
-        if (mudouSenha) atualizacoesAuth.password = novaSenha;
+        // ATUALIZAÇÃO DE SENHA E EMAIL SEPARADAS PARA EVITAR CONFLITOS NA API DO SUPABASE
+        if (mudouSenha) {
+            const { error: passwordError } = await supabase.auth.updateUser({ password: novaSenha });
+            if (passwordError) {
+                console.error("Erro ao atualizar senha:", passwordError);
+                throw new Error(passwordError.message === "New password should be different from the old password." 
+                    ? "A nova senha deve ser diferente da antiga." 
+                    : `Erro na nova senha: ${passwordError.message}`);
+            }
+        }
 
-        const { data: authData, error: authError } = await supabase.auth.updateUser(atualizacoesAuth);
-        if (authError) throw new Error('Não foi possível atualizar as credenciais no servidor. Tente novamente em alguns instantes.');
-
-        emailConfirmadoAgora = !mudouEmail || authData.user?.email?.toLowerCase() === novoEmail;
+        if (mudouEmail) {
+            const { data: authData, error: emailError } = await supabase.auth.updateUser({ email: novoEmail });
+            if (emailError) {
+                console.error("Erro ao atualizar e-mail:", emailError);
+                throw new Error(`Não foi possível alterar o e-mail: ${emailError.message}`);
+            }
+            emailConfirmadoAgora = authData.user?.email?.toLowerCase() === novoEmail;
+        }
       }
 
       // Atualiza o perfil na tabela perfis_usuario se houver mudança de telefone ou e-mail confirmado
@@ -98,11 +110,11 @@ export default function Perfil() {
           .from('perfis_usuario')
           .upsert(atualizacaoPerfil, { onConflict: 'id' });
 
-        if (perfilError) throw new Error('Não foi possível atualizar os dados complementares. Tente novamente.');
+        if (perfilError) throw new Error('Não foi possível atualizar o número de telefone.');
       }
 
       if (mudouEmail && !emailConfirmadoAgora) {
-        setMensagem({ texto: 'Dados guardados. Enviámos um link de confirmação para o novo e-mail: a troca só passa a valer depois de confirmada.', tipo: 'sucesso' });
+        setMensagem({ texto: 'Senha e telefone atualizados! Enviámos um link de confirmação para o novo e-mail: a troca só passa a valer depois de confirmada lá.', tipo: 'sucesso' });
         setEmail(user.email);
       } else {
         setMensagem({ texto: 'Dados atualizados com sucesso!', tipo: 'sucesso' });
